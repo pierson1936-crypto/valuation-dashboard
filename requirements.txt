@@ -1,0 +1,2 @@
+# Excel export. The web dashboard and analysis engine otherwise use Python's standard library.
+openpyxl==3.1.5

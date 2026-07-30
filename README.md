@@ -1,0 +1,181 @@
+# 估值·技术·基本面分析台
+
+一个运行在本机浏览器中的 A 股、ETF 和指数分析工具。它从公开接口按需读取数据，
+计算历史分位和技术指标，并生成规则化报告。AI 功能可选；基础查询不需要 API Key。
+所有内容仅供研究，不构成投资建议。
+
+## 当前功能
+
+- 股票：PE-TTM、PB 和股价最长近 5 年历史分位，行业中位对比、基本面、技术指标、
+  近 5 日资金流、异动提醒和风险评分。
+- ETF/指数：股价近 5 年历史分位、技术指标、资金流和规则报告；当前不提供
+  ETF/指数级 PE/PB。
+- 大盘：主要指数行情、板块 ETF 强弱排序和 SVG 动效。
+- 自选：浏览器本地保存代码和分组，批量刷新行情，汇总组均/中位涨幅、上涨家数和
+  当日组均轨迹。
+- 导出：生成包含概览、报告、K 线和估值序列的 Excel。
+- 可选 AI：DeepSeek 对话、多维分析、多股对比；首席汇总可选 OpenAI。
+- 本地盯盘：Web 三线设置与启停、自动异动、事件记录和微信通知适配。
+- 持仓逻辑转化：保存原逻辑、失效条件和复核事项，按需整理规则和复核提醒。
+
+## 技术栈
+
+- Python 3，标准库 HTTP 服务、并发、网络请求和指标计算；
+- 原生 HTML/CSS/JavaScript，内嵌于 `app.py`；
+- ECharts 5（从 jsDelivr CDN 运行时加载）；
+- `openpyxl`（仅 Excel 导出）；
+- `unittest`（测试）；Web 核心无数据库，盯盘使用本地 SQLite；无 Node 构建步骤。
+
+## 环境与安装
+
+已在 Windows、Python 3.12.4、openpyxl 3.1.5 下验证。建议 Python 3.10 以上。
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+`启动.bat` 在缺少 `openpyxl` 时会尝试自动安装；开发和交接场景建议先按上面的
+命令显式安装，以便知道环境发生了什么变化。
+
+## 配置
+
+基础分析无需配置。AI 功能使用以下环境变量：
+
+| 变量 | 用途 | 必需 |
+| --- | --- | --- |
+| `DEEPSEEK_API_KEY` | DeepSeek AI 功能的服务器端默认 Key | AI 功能可选 |
+| `AGENT_BASE` | OpenAI 兼容模型接口地址 | 否 |
+| `AGENT_MODEL` | DeepSeek/兼容接口模型名 | 否 |
+| `OPENAI_API_KEY` | 多股对比中可选的 GPT 首席 | 否 |
+
+也可在页面中输入 Key。页面会把 Key 保存在当前浏览器的 `localStorage`，请求 AI
+时发送给本机 `127.0.0.1` 服务，再由本机服务调用对应模型 API；项目不会把它写入
+项目文件。共享电脑上不要使用浏览器保存方式。
+
+PowerShell 临时设置示例：
+
+```powershell
+$env:DEEPSEEK_API_KEY = Read-Host "请输入 DeepSeek API Key"
+python -X utf8 agent.py
+```
+
+## 启动
+
+面向普通使用者：双击 `启动.bat`。它会启动服务并自动打开浏览器。
+
+开发者推荐：
+
+```powershell
+python -X utf8 app.py
+```
+
+然后访问 `http://127.0.0.1:8688/`。关闭运行窗口或按 `Ctrl+C` 停止。
+
+网页顶部切换到“盯盘”，即可设置关注价、风险价和可选目标价，并启动或暂停本机
+后台监控。分钟盯盘不依赖页面顶部的模型 Key；只有手工点击“AI 整理规则”或事件
+复核时才会使用顶部 DeepSeek Key。
+
+命令行 AI：
+
+```powershell
+python -X utf8 agent.py
+```
+
+本地盯盘：
+
+```powershell
+python -X utf8 monitor.py quick-setup 600519 `
+  --name 贵州茅台 `
+  --watch-price 1100 `
+  --risk-price 1000 `
+  --target-price 1400
+python -X utf8 monitor.py overview
+python -X utf8 monitor.py watch
+```
+
+分钟轮询不会调用大模型，Token 消耗为 0。Web 和 CLI 共用同一个 SQLite 数据库。
+“持仓逻辑转化”最多生成 3 条待确认草案，不会自动启用；基础模式不发送高级指标，
+每轮只确认一个关键问题。历史前低候选由本地数据确定性计算，0 Token。事件复核默认
+每天最多 5 次、8000 Token，并对相同输入缓存 7 天。
+规则、数据保留、微信通知和完整命令见
+[`docs/MONITORING.md`](docs/MONITORING.md)。
+
+## 自选分组追踪
+
+在“自选”页添加代码时可以填写分组，例如“科技龙头”。已有标的可用行末的文件夹
+按钮调整分组；分组标题旁的铅笔按钮可随时重命名整个分组，改成已有名称时会合并。
+未分组的旧自选数据会继续保留，并自动显示在“未分组”中，也可以直接重命名。
+单纯改名会保留当天追踪轨迹；合并会因为组员集合变化而重新建立基线。
+
+每个分组按当前组员等权计算组均涨幅、中位涨幅和上涨家数，并在当前浏览器保存当天
+最多 72 次组均记录。组内成员或日期变化后会重新建立基线。“同步回暖”表示组均涨幅
+较当天首次记录提升至少 0.3 个百分点，同时上涨占比提升至少 20 个百分点；单组少于
+2 只有效行情时只显示“样本不足”。
+
+这些数据只反映用户自行选择的样本，不等同于官方行业指数、行业全样本或买卖信号。
+
+## 数据初始化与更新
+
+Web 分析不需要预置数据库，行情和估值在查询时从外部接口获取。盯盘首次运行会自动
+创建本地 `data/monitor.db`，用于保存三线、行情快照和提醒记录：
+
+- 东方财富：代码识别、PE/PB、行业、基本面和资金流；
+- 腾讯证券：前复权日 K、实时报价和大盘/板块行情；
+- 新浪财经：腾讯日 K 不可用或样本过少时的备用来源。
+
+个股完整分析在进程内缓存 180 秒，大盘/板块缓存 120 秒；重启进程会清空缓存。
+估值和基本面以数据源已发布的最近交易日/报告期为准。
+“近 5 年”是最大目标窗口；若上游只返回更短历史，结果会使用实际可得样本，响应中的
+`start`、`date` 和 `count` 反映 K 线真实范围。
+
+## 测试
+
+```powershell
+python -X utf8 -m unittest discover -s tests -v
+python -m py_compile app.py agent.py tests\fixtures.py tests\test_analysis.py tests\test_http.py
+```
+
+测试使用固定样例和 Mock，不依赖真实行情、模型 API 或固定端口。真实页面验收方法见
+[`docs/TESTING.md`](docs/TESTING.md)。
+
+## 常见问题
+
+**页面打不开或提示端口占用**
+
+确认没有旧的 Python 进程占用 `8688`。源码更新后应重启实际监听该端口的进程。
+
+**行情或估值为空**
+
+公开接口可能限流、变更或临时不可用；先稍后重试。ETF/指数没有个股 PE/PB 是当前
+产品边界，不是抓取失败。
+
+**图表空白**
+
+ECharts 当前从 CDN 加载；离线、代理或 CDN 不可达时图表可能不可用，文本指标仍由
+本地页面显示。
+
+**Excel 导出提示缺少组件**
+
+运行 `python -m pip install -r requirements.txt`。
+
+## 目录
+
+```text
+├─ app.py                 # 核心业务、HTTP 服务和内嵌前端
+├─ agent.py               # 命令行 AI 薄入口
+├─ monitor.py             # 本地盯盘命令入口
+├─ monitoring/            # 三线预设、SQLite、规则、盯盘、通知和 AI 草案
+├─ data/                  # 本地监控数据库位置（数据库已忽略）
+├─ 启动.bat               # 网页兼容启动入口
+├─ 启动AI助手.bat         # CLI AI 兼容启动入口
+├─ 启动盯盘.bat           # 本地持续盯盘入口
+├─ tests/                 # 隔离的固定样例与 HTTP 冒烟测试
+├─ docs/                  # 架构、决策、状态和交接文档
+├─ AGENTS.md              # 后续智能体首读入口
+└─ requirements.txt       # 可复现依赖
+```
+
+维护者先读 [`AGENTS.md`](AGENTS.md) 和
+[`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md)。

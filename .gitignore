@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+
+# Runtime and generated files
+*.log
+logs/
+*_analysis.xlsx
+~$*.xlsx
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+data/*.db
+data/*.db-*
+data/*.sqlite
+data/*.sqlite-*
+
+# Editor and local agent metadata
+.idea/
+.vscode/
+.codex/
+.agents/
+
+# Operating system
+Thumbs.db
+.DS_Store
