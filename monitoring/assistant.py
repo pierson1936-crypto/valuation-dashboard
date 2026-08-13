@@ -327,13 +327,18 @@ class RuleDraftAssistant:
         self.llm_call = llm_call or self._call_llm
 
     def _call_llm(
-        self, system: str, user: str, api_key: str = ""
+        self,
+        system: str,
+        user: str,
+        api_key: str = "",
+        deepseek_model: str = "",
     ) -> str:
         key = str(api_key or self.config.deepseek_api_key).strip()
         if not key:
             raise ValueError("未设置 DEEPSEEK_API_KEY")
+        model_name = app.resolve_deepseek_model(deepseek_model)
         body = {
-            "model": app.AGENT_MODEL,
+            "model": model_name,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -422,6 +427,7 @@ class RuleDraftAssistant:
         api_key: str = "",
         advanced_mode: bool = False,
         confirmation: dict[str, Any] | None = None,
+        deepseek_model: str = "",
     ) -> dict[str, Any]:
         code = str(code).strip()
         logic = str(logic_text).strip()
@@ -431,6 +437,7 @@ class RuleDraftAssistant:
             raise ValueError("请提供你的买入、卖出或异动逻辑")
         if len(logic) > 2000:
             raise ValueError("逻辑描述不能超过 2000 字")
+        model_name = app.resolve_deepseek_model(deepseek_model)
         confirmed_action = ""
         if isinstance(confirmation, dict) and confirmation.get("approved") is True:
             confirmed_action = str(confirmation.get("action") or "").strip()
@@ -441,7 +448,7 @@ class RuleDraftAssistant:
                 "%s\n%s\n%s\n%s\n%s\n%s"
                 % (
                     RULE_DRAFT_VERSION,
-                    app.AGENT_MODEL,
+                    model_name,
                     code,
                     logic,
                     int(bool(advanced_mode)),
@@ -596,7 +603,7 @@ class RuleDraftAssistant:
         raw = (
             self.llm_call(system_prompt, user)
             if self._custom_llm
-            else self.llm_call(system_prompt, user, api_key)
+            else self.llm_call(system_prompt, user, api_key, model_name)
         )
         payload = self._normalize_payload(_extract_json(raw))
         remaining_confirmations = []
@@ -626,7 +633,7 @@ class RuleDraftAssistant:
         payload.update(
             {
                 "code": code,
-                "model": app.AGENT_MODEL,
+                "model": model_name,
                 "manual_review_items": manual_items,
                 "periodic_review_items": periodic_items,
                 "auto_rule_count": len(payload["rules"]),

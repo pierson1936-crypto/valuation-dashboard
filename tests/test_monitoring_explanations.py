@@ -84,6 +84,33 @@ class EventExplanationAssistantTests(unittest.TestCase):
         self.assertEqual(first["daily_usage"]["calls"], 1)
         self.assertEqual(first["daily_usage"]["tokens"], 321)
 
+    def test_model_choice_is_part_of_event_explanation_cache(self):
+        now = datetime(2026, 7, 28, 2, 0, tzinfo=timezone.utc)
+        event_id = self.add_event(now)
+        assistant = EventExplanationAssistant(
+            self.config, self.repository, self.llm
+        )
+
+        flash = assistant.explain(
+            event_id,
+            "test-key",
+            now=now,
+            deepseek_model="deepseek-v4-flash",
+        )
+        pro = assistant.explain(
+            event_id,
+            "test-key",
+            now=now,
+            deepseek_model="deepseek-v4-pro",
+        )
+
+        self.assertFalse(flash["cached"])
+        self.assertFalse(pro["cached"])
+        self.assertEqual(flash["model"], "deepseek-v4-flash")
+        self.assertEqual(pro["model"], "deepseek-v4-pro")
+        self.assertEqual(self.calls, 2)
+        self.assertEqual(self.repository.count_rows("event_explanations"), 2)
+
     def test_failed_json_releases_reserved_daily_budget(self):
         now = datetime(2026, 7, 28, 2, 0, tzinfo=timezone.utc)
         event_id = self.add_event(now)

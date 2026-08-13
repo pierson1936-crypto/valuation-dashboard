@@ -161,6 +161,36 @@ CREATE TABLE IF NOT EXISTS notification_jobs (
 CREATE INDEX IF NOT EXISTS idx_notification_jobs_due
 ON notification_jobs(status, next_attempt_at);
 
+CREATE TABLE IF NOT EXISTS holding_ocr_cache (
+    cache_key TEXT PRIMARY KEY,
+    model TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    token_usage INTEGER NOT NULL DEFAULT 0,
+    payload_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS portfolio_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_judgment TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    cache_key TEXT,
+    snapshot_hash TEXT,
+    model TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    token_usage INTEGER NOT NULL DEFAULT 0,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    error TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_reports_cache
+ON portfolio_reports(cache_key, status, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_reports_created
+ON portfolio_reports(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS metadata (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -239,6 +269,256 @@ class MonitorRepository:
         sql += " ORDER BY code"
         with self.connect() as conn:
             return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+    def list_holdings(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT code, name, enabled, quantity, cost_price, updated_at
+                    FROM watchlist
+                    WHERE quantity IS NOT NULL OR cost_price IS NOT NULL
+                    ORDER BY code
+                    """
+                ).fetchall()
+            ]
+
+    def upsert_holdings(
+        self,
+        holdings: list[dict[str, Any]],
+        now: datetime | None = None,
+    ) -> None:
+        stamp = iso_utc(now)
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany(
+                """
+                INSERT INTO watchlist
+                    (code, name, enabled, quantity, cost_price, notes,
+                     created_at, updated_at)
+                VALUES (?, ?, 1, ?, ?, '', ?, ?)
+                ON CONFLICT(code) DO UPDATE SET
+                    name = CASE
+                        WHEN excluded.name <> '' THEN excluded.name
+                        ELSE watchlist.name
+                    END,
+                    quantity = excluded.quantity,
+                    cost_price = excluded.cost_price,
+                    updated_at = excluded.updated_at
+                """,
+                [
+                    (
+                        item["code"],
+                        item["name"],
+                        item["quantity"],
+                        item["cost_price"],
+                        stamp,
+                        stamp,
+                    )
+                    for item in holdings
+                ],
+            )
+
+    def get_cached_holding_ocr(
+        self, cache_key: str, now: datetime | None = None
+    ) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT model, created_at, expires_at, token_usage, payload_json
+                FROM holding_ocr_cache
+                WHERE cache_key = ? AND expires_at > ?
+                """,
+                (cache_key, iso_utc(now)),
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["payload"] = json.loads(result.pop("payload_json"))
+        return result
+
+    def save_holding_ocr(
+        self,
+        cache_key: str,
+        model: str,
+        payload: dict[str, Any],
+        retention_days: int,
+        token_usage: int = 0,
+        now: datetime | None = None,
+    ) -> None:
+        current = now or utc_now()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO holding_ocr_cache
+                    (cache_key, model, created_at, expires_at,
+                     token_usage, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    cache_key,
+                    model,
+                    iso_utc(current),
+                    iso_utc(current + timedelta(days=retention_days)),
+                    max(0, int(token_usage)),
+                    json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                ),
+            )
+
+    def create_portfolio_report(
+        self,
+        user_judgment: str,
+        model: str,
+        retention_days: int,
+        now: datetime | None = None,
+        provider: str = "deepseek",
+    ) -> int:
+        current = now or utc_now()
+        stamp = iso_utc(current)
+        initial_payload = json.dumps(
+            {"provider": str(provider or "deepseek").strip().lower()},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO portfolio_reports
+                    (user_judgment, status, model, created_at, updated_at,
+                     expires_at, payload_json)
+                VALUES (?, 'pending', ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_judgment,
+                    model,
+                    stamp,
+                    stamp,
+                    iso_utc(current + timedelta(days=retention_days)),
+                    initial_payload,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def get_cached_portfolio_report(
+        self, cache_key: str, now: datetime | None = None
+    ) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, user_judgment, status, cache_key, snapshot_hash,
+                       model, created_at, updated_at, expires_at, token_usage,
+                       payload_json, error
+                FROM portfolio_reports
+                WHERE cache_key = ? AND status = 'complete' AND expires_at > ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (cache_key, iso_utc(now)),
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["payload"] = json.loads(result.pop("payload_json"))
+        return result
+
+    def complete_portfolio_report(
+        self,
+        report_id: int,
+        cache_key: str,
+        snapshot_hash: str,
+        payload: dict[str, Any],
+        token_usage: int,
+        now: datetime | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE portfolio_reports
+                SET status = 'complete', cache_key = ?, snapshot_hash = ?,
+                    updated_at = ?, token_usage = ?, payload_json = ?, error = ''
+                WHERE id = ?
+                """,
+                (
+                    cache_key,
+                    snapshot_hash,
+                    iso_utc(now),
+                    max(0, int(token_usage)),
+                    json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                    int(report_id),
+                ),
+            )
+
+    def fail_portfolio_report(
+        self, report_id: int, error: str, now: datetime | None = None
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE portfolio_reports
+                SET status = 'failed', updated_at = ?, error = ?
+                WHERE id = ? AND status = 'pending'
+                """,
+                (iso_utc(now), str(error or "")[:300], int(report_id)),
+            )
+
+    def get_latest_portfolio_report(
+        self, now: datetime | None = None
+    ) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, user_judgment, status, cache_key, snapshot_hash,
+                       model, created_at, updated_at, expires_at, token_usage,
+                       payload_json, error
+                FROM portfolio_reports
+                WHERE expires_at > ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (iso_utc(now),),
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["payload"] = json.loads(result.pop("payload_json"))
+        return result
+
+    def list_portfolio_reports(
+        self, limit: int = 7, now: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit), 7))
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, user_judgment, status, cache_key, snapshot_hash,
+                       model, created_at, updated_at, expires_at, token_usage,
+                       payload_json, error
+                FROM portfolio_reports
+                WHERE status = 'complete'
+                ORDER BY id DESC LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+        reports = []
+        for row in rows:
+            report = dict(row)
+            report["payload"] = json.loads(report.pop("payload_json"))
+            reports.append(report)
+        return reports
+
+    def trim_portfolio_reports(self, keep_complete: int = 7) -> int:
+        safe_keep = max(1, min(int(keep_complete), 7))
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                DELETE FROM portfolio_reports
+                WHERE status = 'complete' AND id NOT IN (
+                    SELECT id FROM portfolio_reports
+                    WHERE status = 'complete'
+                    ORDER BY id DESC LIMIT ?
+                )
+                """,
+                (safe_keep,),
+            ).rowcount
 
     def save_watch_logic(
         self,
@@ -667,8 +947,10 @@ class MonitorRepository:
         call_limit: int,
         token_limit: int,
         now: datetime | None = None,
+        calls: int = 1,
     ) -> dict[str, Any]:
         requested = max(0, int(tokens))
+        requested_calls = max(1, int(calls))
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -677,11 +959,11 @@ class MonitorRepository:
             ).fetchone()
             calls = int(row["calls"]) if row else 0
             used_tokens = int(row["tokens"]) if row else 0
-            if calls + 1 > call_limit:
+            if call_limit > 0 and calls + requested_calls > call_limit:
                 raise ValueError("今日 AI 解释次数已达上限")
-            if used_tokens + requested > token_limit:
+            if token_limit > 0 and used_tokens + requested > token_limit:
                 raise ValueError("今日 AI 解释 Token 预算不足")
-            calls += 1
+            calls += requested_calls
             used_tokens += requested
             stamp = iso_utc(now)
             conn.execute(
@@ -904,6 +1186,24 @@ class MonitorRepository:
             explanation_count = conn.execute(
                 "DELETE FROM event_explanations WHERE expires_at <= ?", (stamp,)
             ).rowcount
+            holding_ocr_count = conn.execute(
+                "DELETE FROM holding_ocr_cache WHERE expires_at <= ?", (stamp,)
+            ).rowcount
+            portfolio_report_count = conn.execute(
+                """
+                DELETE FROM portfolio_reports
+                WHERE expires_at <= ?
+                  AND (
+                      status != 'complete'
+                      OR id NOT IN (
+                          SELECT id FROM portfolio_reports
+                          WHERE status = 'complete'
+                          ORDER BY id DESC LIMIT 7
+                      )
+                  )
+                """,
+                (stamp,),
+            ).rowcount
             usage_count = conn.execute(
                 "DELETE FROM ai_usage WHERE usage_date < ?",
                 ((current - timedelta(days=90)).date().isoformat(),),
@@ -920,6 +1220,8 @@ class MonitorRepository:
             "events": event_count,
             "ai_rule_drafts": draft_count,
             "event_explanations": explanation_count,
+            "holding_ocr_cache": holding_ocr_count,
+            "portfolio_reports": portfolio_report_count,
             "ai_usage": usage_count,
         }
 
@@ -950,6 +1252,8 @@ class MonitorRepository:
             "event_explanations",
             "ai_usage",
             "notification_jobs",
+            "holding_ocr_cache",
+            "portfolio_reports",
         }
         if table not in allowed:
             raise ValueError("不允许读取该表")

@@ -68,6 +68,7 @@ class EventExplanationAssistant:
     ):
         self.config = config
         self.repository = repository
+        self._custom_llm = llm_call is not None
         self.llm_call = llm_call or self._call_llm
 
     @staticmethod
@@ -101,9 +102,12 @@ class EventExplanationAssistant:
             result[field] = [item[:500] for item in value[:8]]
         return result
 
-    def _call_llm(self, system: str, user: str, api_key: str) -> dict[str, Any]:
+    def _call_llm(
+        self, system: str, user: str, api_key: str, deepseek_model: str = ""
+    ) -> dict[str, Any]:
+        model_name = app.resolve_deepseek_model(deepseek_model)
         body = {
-            "model": app.AGENT_MODEL,
+            "model": model_name,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -149,6 +153,7 @@ class EventExplanationAssistant:
         api_key: str,
         force: bool = False,
         now: datetime | None = None,
+        deepseek_model: str = "",
     ) -> dict[str, Any]:
         try:
             normalized_event_id = int(event_id)
@@ -157,6 +162,7 @@ class EventExplanationAssistant:
         key = str(api_key or "").strip()
         if not key:
             raise ValueError("缺少 DeepSeek Key")
+        model_name = app.resolve_deepseek_model(deepseek_model)
         event = self.repository.get_event(normalized_event_id)
         if not event:
             raise ValueError("未找到该提醒事件")
@@ -170,7 +176,7 @@ class EventExplanationAssistant:
         cache_source = json.dumps(
             {
                 "version": EXPLANATION_VERSION,
-                "model": app.AGENT_MODEL,
+                "model": model_name,
                 "event": event,
                 "logic": logic,
             },
@@ -227,7 +233,9 @@ class EventExplanationAssistant:
         )
         try:
             raw, actual_tokens = self._unpack_response(
-                self.llm_call(SYSTEM_PROMPT, user, key),
+                self.llm_call(SYSTEM_PROMPT, user, key)
+                if self._custom_llm
+                else self.llm_call(SYSTEM_PROMPT, user, key, model_name),
                 estimated,
             )
             payload = self._normalize(_strict_json(raw))
@@ -250,7 +258,7 @@ class EventExplanationAssistant:
         self.repository.save_event_explanation(
             cache_key,
             normalized_event_id,
-            app.AGENT_MODEL,
+            model_name,
             payload,
             actual_tokens,
             self.config.event_explanation_retention_days,
@@ -259,7 +267,7 @@ class EventExplanationAssistant:
         return {
             **payload,
             "event_id": normalized_event_id,
-            "model": app.AGENT_MODEL,
+            "model": model_name,
             "token_usage": actual_tokens,
             "cached": False,
             "daily_usage": daily,

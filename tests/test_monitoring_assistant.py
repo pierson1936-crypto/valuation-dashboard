@@ -116,6 +116,29 @@ class RuleDraftAssistantTests(unittest.TestCase):
         self.assertEqual(first["needs_confirmation"], [])
         self.assertEqual(self.analyzer_calls, 0)
 
+    def test_model_choice_is_part_of_rule_draft_cache(self):
+        assistant = RuleDraftAssistant(
+            self.config, self.repository, self.analyzer, self.llm
+        )
+
+        flash = assistant.suggest(
+            "600000",
+            "价格回落时提醒",
+            deepseek_model="deepseek-v4-flash",
+        )
+        pro = assistant.suggest(
+            "600000",
+            "价格回落时提醒",
+            deepseek_model="deepseek-v4-pro",
+        )
+
+        self.assertFalse(flash["cached"])
+        self.assertFalse(pro["cached"])
+        self.assertEqual(flash["model"], "deepseek-v4-flash")
+        self.assertEqual(pro["model"], "deepseek-v4-pro")
+        self.assertEqual(self.calls, 2)
+        self.assertEqual(self.repository.count_rows("ai_rule_drafts"), 2)
+
     def test_system_prompt_injects_allowlists_and_defaults(self):
         self.assertNotIn("{{ALLOWED_METRICS}}", SYSTEM_PROMPT)
         self.assertNotIn("{{DEFAULT_CONFIRM_COUNT}}", SYSTEM_PROMPT)

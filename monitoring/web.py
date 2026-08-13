@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 import threading
 from datetime import datetime, timedelta, timezone
@@ -28,6 +29,18 @@ def _payload_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _holding_number(value: Any, label: str) -> float:
+    if isinstance(value, bool) or value in (None, ""):
+        raise ValueError(f"{label}必须是非负数")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label}必须是非负数") from exc
+    if not math.isfinite(number) or number < 0:
+        raise ValueError(f"{label}必须是非负数")
+    return number
+
+
 class MonitorWebController:
     def __init__(
         self,
@@ -36,6 +49,8 @@ class MonitorWebController:
         service_factory: Callable[[], Any] | None = None,
         explanation_factory: Callable[[], Any] | None = None,
         rule_assistant_factory: Callable[[], Any] | None = None,
+        holding_ocr_factory: Callable[[], Any] | None = None,
+        portfolio_report_factory: Callable[[], Any] | None = None,
     ):
         self.config = config or MonitorConfig.from_env()
         self.repository = repository or MonitorRepository(self.config.db_path)
@@ -43,9 +58,13 @@ class MonitorWebController:
         self.service_factory = service_factory
         self.explanation_factory = explanation_factory
         self.rule_assistant_factory = rule_assistant_factory
+        self.holding_ocr_factory = holding_ocr_factory
+        self.portfolio_report_factory = portfolio_report_factory
         self._service = None
         self._explanation_assistant = None
         self._rule_assistant = None
+        self._holding_ocr_assistant = None
+        self._portfolio_report_assistant = None
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._state_lock = threading.Lock()
@@ -92,6 +111,28 @@ class MonitorWebController:
                     self.config, self.repository
                 )
         return self._rule_assistant
+
+    def _get_holding_ocr_assistant(self):
+        if self._holding_ocr_assistant is None:
+            if self.holding_ocr_factory:
+                self._holding_ocr_assistant = self.holding_ocr_factory()
+            else:
+                from monitoring.holding_ocr import HoldingOCRAssistant
+
+                self._holding_ocr_assistant = HoldingOCRAssistant(self.repository)
+        return self._holding_ocr_assistant
+
+    def _get_portfolio_report_assistant(self):
+        if self._portfolio_report_assistant is None:
+            if self.portfolio_report_factory:
+                self._portfolio_report_assistant = self.portfolio_report_factory()
+            else:
+                from monitoring.portfolio import PortfolioReportAssistant
+
+                self._portfolio_report_assistant = PortfolioReportAssistant(
+                    self.config, self.repository
+                )
+        return self._portfolio_report_assistant
 
     def runtime_status(self) -> dict[str, Any]:
         with self._state_lock:
@@ -174,6 +215,173 @@ class MonitorWebController:
             target,
         )
         return result
+
+    def list_holdings(self) -> dict[str, Any]:
+        return {
+            "holdings": [
+                {
+                    "code": item["code"],
+                    "name": item["name"],
+                    "quantity": item["quantity"],
+                    "cost_price": item["cost_price"],
+                    "enabled": bool(item["enabled"]),
+                    "updated_at": item["updated_at"],
+                }
+                for item in self.repository.list_holdings()
+            ]
+        }
+
+    def recognize_holding_screenshot(
+        self, payload: dict[str, Any], api_key: str
+    ) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("截图识别请求必须是对象")
+        return self._get_holding_ocr_assistant().recognize(
+            payload.get("image_data_url"),
+            api_key,
+            payload.get("base_url"),
+        )
+
+    def latest_portfolio_report(self) -> dict[str, Any]:
+        return self._get_portfolio_report_assistant().latest()
+
+    def portfolio_report_history(self) -> dict[str, Any]:
+        return self._get_portfolio_report_assistant().history()
+
+    def portfolio_scan(self) -> dict[str, Any]:
+        return self._get_portfolio_report_assistant().scan()
+
+    def generate_portfolio_report(
+        self, payload: dict[str, Any], api_key: str
+    ) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("持仓报告请求必须是对象")
+        return self._get_portfolio_report_assistant().generate(
+            payload.get("user_judgment"),
+            api_key,
+            force=_payload_bool(payload.get("force")),
+            provider=payload.get("provider") or "deepseek",
+            deepseek_model=payload.get("deepseek_model") or "",
+        )
+
+    def upsert_holdings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raw_holdings = payload.get("holdings") if isinstance(payload, dict) else None
+        if not isinstance(raw_holdings, list):
+            return {
+                "saved": [],
+                "errors": [
+                    {
+                        "index": None,
+                        "code": "",
+                        "field": "holdings",
+                        "message": "持仓数据必须是数组",
+                    }
+                ],
+            }
+        if len(raw_holdings) > 100:
+            return {
+                "saved": [],
+                "errors": [
+                    {
+                        "index": None,
+                        "code": "",
+                        "field": "holdings",
+                        "message": "单次最多确认 100 条持仓",
+                    }
+                ],
+            }
+
+        normalized: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+        seen_codes: set[str] = set()
+        for index, raw_item in enumerate(raw_holdings):
+            if not isinstance(raw_item, dict):
+                errors.append(
+                    {
+                        "index": index,
+                        "code": "",
+                        "field": "row",
+                        "message": "每条持仓必须是对象",
+                    }
+                )
+                continue
+
+            code = str(raw_item.get("code") or "").strip()
+            item_errors: list[dict[str, Any]] = []
+            if not re.fullmatch(r"\d{6}", code):
+                item_errors.append(
+                    {
+                        "index": index,
+                        "code": code,
+                        "field": "code",
+                        "message": "代码必须是 6 位数字",
+                    }
+                )
+            elif code in seen_codes:
+                item_errors.append(
+                    {
+                        "index": index,
+                        "code": code,
+                        "field": "code",
+                        "message": "同一批持仓中代码不能重复",
+                    }
+                )
+            else:
+                seen_codes.add(code)
+
+            raw_name = raw_item.get("name", "")
+            if not isinstance(raw_name, str):
+                item_errors.append(
+                    {
+                        "index": index,
+                        "code": code,
+                        "field": "name",
+                        "message": "名称必须是文本",
+                    }
+                )
+                name = ""
+            else:
+                name = raw_name.strip()
+                if len(name) > 80:
+                    item_errors.append(
+                        {
+                            "index": index,
+                            "code": code,
+                            "field": "name",
+                            "message": "名称不能超过 80 字",
+                        }
+                    )
+
+            numbers: dict[str, float] = {}
+            for field, label in (("quantity", "持仓数量"), ("cost_price", "成本价")):
+                try:
+                    numbers[field] = _holding_number(raw_item.get(field), label)
+                except ValueError as exc:
+                    item_errors.append(
+                        {
+                            "index": index,
+                            "code": code,
+                            "field": field,
+                            "message": str(exc),
+                        }
+                    )
+
+            errors.extend(item_errors)
+            if not item_errors:
+                normalized.append(
+                    {
+                        "code": code,
+                        "name": name,
+                        "quantity": numbers["quantity"],
+                        "cost_price": numbers["cost_price"],
+                    }
+                )
+
+        if errors:
+            return {"saved": [], "errors": errors}
+
+        self.repository.upsert_holdings(normalized)
+        return {"saved": normalized, "errors": []}
 
     def save_logic(self, payload: dict[str, Any]) -> dict[str, Any]:
         code = str(payload.get("code") or "").strip()
@@ -264,6 +472,7 @@ class MonitorWebController:
             api_key=api_key,
             advanced_mode=_payload_bool(payload.get("advanced_mode")),
             confirmation=confirmation,
+            deepseek_model=payload.get("deepseek_model") or "",
         )
         logic_saved = bool(
             stored
@@ -314,11 +523,13 @@ class MonitorWebController:
         event_id: Any,
         api_key: str,
         force: bool = False,
+        deepseek_model: str = "",
     ) -> dict[str, Any]:
         return self._get_explanation_assistant().explain(
             event_id,
             api_key,
             force=force,
+            deepseek_model=deepseek_model,
         )
 
     def remove_watch(self, code: str) -> bool:

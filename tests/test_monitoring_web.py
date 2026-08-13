@@ -38,6 +38,7 @@ class FakeRuleAssistant:
         api_key="",
         advanced_mode=False,
         confirmation=None,
+        deepseek_model="",
     ):
         self.calls.append(
             {
@@ -47,6 +48,7 @@ class FakeRuleAssistant:
                 "api_key": api_key,
                 "advanced_mode": advanced_mode,
                 "confirmation": confirmation,
+                "deepseek_model": deepseek_model,
             }
         )
         return {
@@ -65,7 +67,7 @@ class FakeRuleAssistant:
 
 
 class FakeExplanationAssistant:
-    def explain(self, event_id, api_key, force=False):
+    def explain(self, event_id, api_key, force=False, deepseek_model=""):
         return {
             "event_id": int(event_id),
             "summary": "事件复核",
@@ -77,6 +79,73 @@ class FakeExplanationAssistant:
             "token_usage": 0,
             "cached": True,
             "daily_usage": {"calls": 1, "tokens": 300},
+            "model": deepseek_model or "deepseek-v4-flash",
+        }
+
+
+class FakeHoldingOCRAssistant:
+    def __init__(self):
+        self.calls = []
+
+    def recognize(self, image_data_url, api_key, base_url):
+        self.calls.append(
+            {
+                "image_data_url": image_data_url,
+                "api_key": api_key,
+                "base_url": base_url,
+            }
+        )
+        return {
+            "holdings": [],
+            "needs_review": ["测试结果"],
+            "cached": False,
+            "model": "qwen3.7-flash",
+            "token_usage": 12,
+        }
+
+
+class FakePortfolioReportAssistant:
+    def __init__(self):
+        self.calls = []
+
+    def latest(self):
+        return {"report": None}
+
+    def history(self):
+        return {"reports": [{"id": 7, "status": "complete"}], "limit": 7}
+
+    def scan(self):
+        return {"ai_used": False, "token_usage": 0, "analytics": {}}
+
+    def generate(
+        self,
+        user_judgment,
+        api_key,
+        force=False,
+        provider="deepseek",
+        deepseek_model="",
+    ):
+        self.calls.append(
+            {
+                "user_judgment": user_judgment,
+                "api_key": api_key,
+                "force": force,
+                "provider": provider,
+                "deepseek_model": deepseek_model,
+            }
+        )
+        return {
+            "report_id": 1,
+            "user_judgment": user_judgment,
+            "status": "complete",
+            "cached": False,
+            "token_usage": 200,
+            "independent_analysis": {"summary": "独立判断", "issues": []},
+            "comparison": {
+                "agreements": [],
+                "disagreements": [],
+                "possible_omissions": [],
+            },
         }
 
 
@@ -95,6 +164,8 @@ class MonitorWebControllerTests(unittest.TestCase):
             lambda: FakeService(self.called),
             FakeExplanationAssistant,
             FakeRuleAssistant,
+            FakeHoldingOCRAssistant,
+            FakePortfolioReportAssistant,
         )
 
     def tearDown(self):
@@ -123,6 +194,164 @@ class MonitorWebControllerTests(unittest.TestCase):
         self.assertNotIn("db_path", overview["settings"])
         self.assertNotIn("wecom_webhook_url", overview["settings"])
         self.assertNotIn("serverchan_sendkey", overview["settings"])
+
+    def test_holding_screenshot_controller_forwards_ephemeral_credentials(self):
+        result = self.controller.recognize_holding_screenshot(
+            {
+                "image_data_url": "data:image/png;base64,test-only",
+                "base_url": "https://workspace.aliyuncs.com/compatible-mode/v1",
+            },
+            "request-header-key",
+        )
+        call = self.controller._holding_ocr_assistant.calls[0]
+
+        self.assertEqual(result["needs_review"], ["测试结果"])
+        self.assertEqual(call["api_key"], "request-header-key")
+        self.assertEqual(
+            call["base_url"],
+            "https://workspace.aliyuncs.com/compatible-mode/v1",
+        )
+
+    def test_portfolio_report_controller_forwards_locked_judgment_and_key(self):
+        result = self.controller.generate_portfolio_report(
+            {
+                "user_judgment": "我担心组合波动",
+                "force": True,
+                "deepseek_model": "deepseek-v4-pro",
+            },
+            "request-key",
+        )
+        call = self.controller._portfolio_report_assistant.calls[0]
+
+        self.assertEqual(result["user_judgment"], "我担心组合波动")
+        self.assertEqual(call["api_key"], "request-key")
+        self.assertTrue(call["force"])
+        self.assertEqual(call["provider"], "deepseek")
+        self.assertEqual(call["deepseek_model"], "deepseek-v4-pro")
+        self.controller.generate_portfolio_report(
+            {"user_judgment": "改用 GPT", "provider": "gpt"},
+            "openai-request-key",
+        )
+        gpt_call = self.controller._portfolio_report_assistant.calls[1]
+        self.assertEqual(gpt_call["api_key"], "openai-request-key")
+        self.assertEqual(gpt_call["provider"], "gpt")
+        self.assertEqual(
+            self.controller.portfolio_scan(),
+            {"ai_used": False, "token_usage": 0, "analytics": {}},
+        )
+        self.assertEqual(self.controller.latest_portfolio_report(), {"report": None})
+        self.assertEqual(
+            self.controller.portfolio_report_history(),
+            {"reports": [{"id": 7, "status": "complete"}], "limit": 7},
+        )
+
+    def test_holdings_batch_upserts_without_touching_existing_state(self):
+        self.repository.upsert_watch(
+            "600519",
+            "旧名称",
+            quantity=100,
+            cost_price=1200,
+            notes="保留备注",
+            enabled=False,
+        )
+        self.repository.upsert_watch(
+            "000001", "平安银行", quantity=200, cost_price=10
+        )
+        self.repository.upsert_watch("600000", "普通自选")
+        rule_id = self.repository.add_rule(
+            "600519", "保留规则", "alert", "price", ">=", 1500
+        )
+
+        result = self.controller.upsert_holdings(
+            {
+                "holdings": [
+                    {
+                        "code": "600519",
+                        "name": "贵州茅台",
+                        "quantity": "120",
+                        "cost_price": "1188.5",
+                    },
+                    {
+                        "code": "300750",
+                        "name": "宁德时代",
+                        "quantity": 0,
+                        "cost_price": 180,
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(result["errors"], [])
+        self.assertEqual([item["code"] for item in result["saved"]], ["600519", "300750"])
+        watches = {item["code"]: item for item in self.repository.list_watch()}
+        self.assertEqual(watches["600519"]["name"], "贵州茅台")
+        self.assertEqual(watches["600519"]["quantity"], 120)
+        self.assertEqual(watches["600519"]["cost_price"], 1188.5)
+        self.assertEqual(watches["600519"]["notes"], "保留备注")
+        self.assertEqual(watches["600519"]["enabled"], 0)
+        self.assertEqual(watches["000001"]["quantity"], 200)
+        self.assertEqual(watches["600000"]["quantity"], None)
+        self.assertEqual(self.repository.list_rules()[0]["id"], rule_id)
+        self.assertEqual(self.repository.list_rules()[0]["threshold"], 1500)
+
+        listed = self.controller.list_holdings()["holdings"]
+        self.assertEqual(
+            [item["code"] for item in listed],
+            ["000001", "300750", "600519"],
+        )
+        self.assertNotIn("notes", listed[0])
+        self.assertFalse(next(item for item in listed if item["code"] == "600519")["enabled"])
+
+    def test_invalid_holdings_batch_is_not_partially_written(self):
+        self.repository.upsert_watch(
+            "600519", "贵州茅台", quantity=100, cost_price=1200
+        )
+
+        result = self.controller.upsert_holdings(
+            {
+                "holdings": [
+                    {
+                        "code": "300750",
+                        "name": "宁德时代",
+                        "quantity": 100,
+                        "cost_price": 180,
+                    },
+                    {
+                        "code": "600519",
+                        "name": "贵州茅台",
+                        "quantity": -1,
+                        "cost_price": float("nan"),
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(result["saved"], [])
+        self.assertEqual(
+            {error["field"] for error in result["errors"]},
+            {"quantity", "cost_price"},
+        )
+        watches = {item["code"]: item for item in self.repository.list_watch()}
+        self.assertNotIn("300750", watches)
+        self.assertEqual(watches["600519"]["quantity"], 100)
+        self.assertEqual(watches["600519"]["cost_price"], 1200)
+
+    def test_holdings_batch_rejects_duplicate_codes_and_invalid_shape(self):
+        duplicate = self.controller.upsert_holdings(
+            {
+                "holdings": [
+                    {"code": "600519", "name": "A", "quantity": 1, "cost_price": 1},
+                    {"code": "600519", "name": "B", "quantity": 2, "cost_price": 2},
+                ]
+            }
+        )
+        invalid_shape = self.controller.upsert_holdings({"holdings": {}})
+
+        self.assertEqual(duplicate["saved"], [])
+        self.assertEqual(duplicate["errors"][0]["field"], "code")
+        self.assertEqual(self.repository.list_watch(), [])
+        self.assertEqual(invalid_shape["saved"], [])
+        self.assertEqual(invalid_shape["errors"][0]["field"], "holdings")
 
     def test_simulated_risk_preview_is_side_effect_free(self):
         self.controller.save_setup(
@@ -217,6 +446,7 @@ class MonitorWebControllerTests(unittest.TestCase):
                 "logic_text": "",
                 "advanced_mode": False,
                 "confirmation": confirmation,
+                "deepseek_model": "deepseek-v4-pro",
             },
             api_key="browser-only-test-key",
         )
@@ -228,6 +458,7 @@ class MonitorWebControllerTests(unittest.TestCase):
         self.assertIn("化工行业盈利修复", call["logic_text"])
         self.assertFalse(call["advanced_mode"])
         self.assertEqual(call["confirmation"], confirmation)
+        self.assertEqual(call["deepseek_model"], "deepseek-v4-pro")
         self.assertTrue(result["logic_saved"])
         self.assertEqual(result["auto_rule_count"], 0)
         self.assertTrue(result["periodic_review_items"])
@@ -264,10 +495,13 @@ class MonitorWebControllerTests(unittest.TestCase):
         )
 
         result = self.controller.explain_event(
-            event_id, "browser-only-test-key"
+            event_id,
+            "browser-only-test-key",
+            deepseek_model="deepseek-v4-pro",
         )
 
         self.assertEqual(result["event_id"], event_id)
+        self.assertEqual(result["model"], "deepseek-v4-pro")
         self.assertTrue(result["cached"])
         self.assertIsNone(self.controller._service)
 

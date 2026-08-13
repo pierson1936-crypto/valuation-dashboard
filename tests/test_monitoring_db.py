@@ -140,6 +140,50 @@ class MonitorRepositoryTests(unittest.TestCase):
                 "2026-07-28", "event_explanation", 100, 1, 1000, now
             )
 
+    def test_ai_usage_can_reserve_two_calls_atomically(self):
+        now = datetime(2026, 7, 28, 2, 0, tzinfo=timezone.utc)
+
+        with self.assertRaisesRegex(ValueError, "次数已达上限"):
+            self.repository.reserve_ai_usage(
+                "2026-07-28",
+                "portfolio_report",
+                5000,
+                1,
+                0,
+                now,
+                calls=2,
+            )
+
+        self.assertEqual(
+            self.repository.get_ai_usage("2026-07-28", "portfolio_report")["calls"],
+            0,
+        )
+        reserved = self.repository.reserve_ai_usage(
+            "2026-07-28",
+            "portfolio_report",
+            5000,
+            2,
+            5000,
+            now,
+            calls=2,
+        )
+        self.assertEqual(reserved["calls"], 2)
+        self.assertEqual(reserved["tokens"], 5000)
+
+    def test_zero_ai_usage_limits_record_without_blocking(self):
+        now = datetime(2026, 7, 28, 2, 0, tzinfo=timezone.utc)
+
+        first = self.repository.reserve_ai_usage(
+            "2026-07-28", "portfolio_report", 50000, 0, 0, now
+        )
+        second = self.repository.reserve_ai_usage(
+            "2026-07-28", "portfolio_report", 60000, 0, 0, now
+        )
+
+        self.assertEqual(first["calls"], 1)
+        self.assertEqual(second["calls"], 2)
+        self.assertEqual(second["tokens"], 110000)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,8 +28,11 @@ class MonitorConfig:
     event_retention_days: int = 365
     ai_draft_retention_days: int = 7
     event_explanation_retention_days: int = 7
-    event_explanation_daily_call_limit: int = 5
-    event_explanation_daily_token_limit: int = 8000
+    event_explanation_daily_call_limit: int = 0
+    event_explanation_daily_token_limit: int = 0
+    portfolio_report_retention_days: int = 7
+    portfolio_report_daily_call_limit: int = 0
+    portfolio_report_daily_token_limit: int = 0
     notification_timeout_seconds: int = 10
     notification_retry_seconds: int = 60
     notification_max_attempts: int = 3
@@ -70,10 +73,19 @@ class MonitorConfig:
                 "MONITOR_EVENT_EXPLANATION_RETENTION_DAYS", 7, 1
             ),
             event_explanation_daily_call_limit=_env_int(
-                "MONITOR_EVENT_EXPLANATION_DAILY_CALL_LIMIT", 5, 1
+                "MONITOR_EVENT_EXPLANATION_DAILY_CALL_LIMIT", 0, 0
             ),
             event_explanation_daily_token_limit=_env_int(
-                "MONITOR_EVENT_EXPLANATION_DAILY_TOKEN_LIMIT", 8000, 1000
+                "MONITOR_EVENT_EXPLANATION_DAILY_TOKEN_LIMIT", 0, 0
+            ),
+            portfolio_report_retention_days=_env_int(
+                "MONITOR_PORTFOLIO_REPORT_RETENTION_DAYS", 7, 1
+            ),
+            portfolio_report_daily_call_limit=_env_int(
+                "MONITOR_PORTFOLIO_REPORT_DAILY_CALL_LIMIT", 0, 0
+            ),
+            portfolio_report_daily_token_limit=_env_int(
+                "MONITOR_PORTFOLIO_REPORT_DAILY_TOKEN_LIMIT", 0, 0
             ),
             notification_timeout_seconds=_env_int(
                 "MONITOR_NOTIFICATION_TIMEOUT_SECONDS", 10, 3
