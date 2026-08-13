@@ -90,6 +90,30 @@ class KeyLevelAnalysisTests(unittest.TestCase):
         self.assertGreaterEqual(result["profit_ratio_pct"], 0.0)
         self.assertLessEqual(result["profit_ratio_pct"], 100.0)
 
+    def test_chip_peak_relation_uses_price_structure_only_as_confirmation(self):
+        chip = {
+            "latest_close": 10.5,
+            "peak_price": 9.98,
+        }
+        box = {"lower": 10.0, "upper": 11.0}
+
+        result = app._describe_chip_peak(chip, box)
+
+        self.assertEqual(result["peak_position"], "现价下方")
+        self.assertEqual(result["structure_overlap"], "support")
+        self.assertIn("筹码重合，参考增强", result["structure_overlap_note"])
+        self.assertEqual(result["estimate_label"], "近120日本地模型估算")
+
+    def test_chip_peak_without_price_overlap_stays_cost_density_only(self):
+        result = app._describe_chip_peak(
+            {"latest_close": 10.0, "peak_price": 12.0},
+            {"lower": 9.0, "upper": 11.0},
+        )
+
+        self.assertEqual(result["peak_position"], "现价上方")
+        self.assertIsNone(result["structure_overlap"])
+        self.assertIn("未与已识别", result["structure_overlap_note"])
+
     def test_etf_uses_box_only_without_fetching_chip_data(self):
         analyzed = {
             "code": "159326",
@@ -347,6 +371,44 @@ class IndependentSecurityReportTests(unittest.TestCase):
         self.assertIn("大盘涨跌快照", serialized)
         self.assertIn("完整分时走势", serialized)
 
+    def test_chip_evidence_only_contains_allowed_estimate_fields(self):
+        key_levels = {
+            "chip_status": "available",
+            "chip": {
+                "peak_price": 17.2,
+                "peak_position": "现价下方",
+                "structure_overlap": "support",
+                "structure_overlap_note": "筹码峰与 K 线可能支撑重合，筹码重合，参考增强。",
+                "as_of": "2026-01-01",
+                "sample_count": 120,
+                "estimate_label": "近120日本地模型估算",
+                "cost_70": {"low": 16.0, "high": 17.5},
+                "profit_ratio_pct": 78.0,
+            },
+        }
+
+        evidence = app.build_security_ai_evidence(
+            self.fixed_result(), self.fixed_market(), key_level_data=key_levels
+        )
+        item = next(row for row in evidence if row["topic"] == "估算成本密集区")
+
+        self.assertEqual(item["data"]["peak_price"], 17.2)
+        self.assertEqual(item["data"]["relative_to_current_price"], "现价下方")
+        self.assertEqual(item["data"]["structure_overlap"], "support")
+        self.assertEqual(item["data"]["sample_days"], 120)
+        self.assertNotIn("cost_70", item["data"])
+        self.assertNotIn("profit_ratio_pct", item["data"])
+        self.assertIn("不代表真实账户持仓", item["data"]["boundary"])
+
+    def test_unavailable_chip_data_is_omitted_from_ai_evidence(self):
+        evidence = app.build_security_ai_evidence(
+            self.fixed_result(),
+            self.fixed_market(),
+            key_level_data={"chip_status": "price_mismatch", "chip": None},
+        )
+
+        self.assertNotIn("估算成本密集区", [item["topic"] for item in evidence])
+
     def test_model_selects_evidence_and_prompt_does_not_prescribe_sections(self):
         response = {
             "choices": [{
@@ -359,6 +421,7 @@ class IndependentSecurityReportTests(unittest.TestCase):
             patch.object(app, "analyze_cached", return_value=self.fixed_result()),
             patch.object(app, "market_overview", return_value=self.fixed_market()),
             patch.object(app, "build_intraday_comparison", return_value={"error": "固定样例无分时"}),
+            patch.object(app, "key_levels_cached", return_value={"chip_status": "unavailable"}),
             patch.object(app, "api_post", return_value=response) as api_post,
         ):
             result = app.generate_security_ai_report(
@@ -372,6 +435,43 @@ class IndependentSecurityReportTests(unittest.TestCase):
         self.assertNotIn("预写风险结论", prompt)
         self.assertEqual([item["id"] for item in result["evidence"]], ["E02", "E05"])
 
+    def test_generated_report_prompt_uses_only_allowed_chip_evidence(self):
+        response = {
+            "choices": [{"message": {"content": "本地估算仅供观察。[[E06]][[E07]]"}}]
+        }
+        key_levels = {
+            "chip_status": "available",
+            "chip": {
+                "peak_price": 17.2,
+                "peak_position": "现价下方",
+                "structure_overlap": "support",
+                "structure_overlap_note": "筹码峰与 K 线可能支撑重合，筹码重合，参考增强。",
+                "as_of": "2026-01-01",
+                "sample_count": 120,
+                "estimate_label": "近120日本地模型估算",
+                "cost_70": {"low": 16.0, "high": 17.5},
+                "profit_ratio_pct": 78.0,
+            },
+        }
+        with (
+            patch.object(app, "analyze_cached", return_value=self.fixed_result()),
+            patch.object(app, "market_overview", return_value=self.fixed_market()),
+            patch.object(app, "build_intraday_comparison", return_value={"error": "固定样例无分时"}),
+            patch.object(app, "key_levels_cached", return_value=key_levels) as load_levels,
+            patch.object(app, "api_post", return_value=response) as api_post,
+        ):
+            app.generate_security_ai_report(
+                "600000", "test-key", "deepseek-v4-flash"
+            )
+
+        prompt = api_post.call_args.args[2]["messages"][1]["content"]
+        load_levels.assert_called_once_with("600000")
+        self.assertIn('"topic": "估算成本密集区"', prompt)
+        self.assertIn("近120日本地模型估算", prompt)
+        self.assertNotIn("profit_ratio_pct", prompt)
+        self.assertNotIn("cost_70", prompt)
+        self.assertIn("不得据此推断持有人必然买卖", prompt)
+
     def test_unknown_evidence_reference_is_rejected(self):
         response = {
             "choices": [{
@@ -382,6 +482,7 @@ class IndependentSecurityReportTests(unittest.TestCase):
             patch.object(app, "analyze_cached", return_value=self.fixed_result()),
             patch.object(app, "market_overview", return_value=self.fixed_market()),
             patch.object(app, "build_intraday_comparison", return_value={"error": "固定样例无分时"}),
+            patch.object(app, "key_levels_cached", return_value={"chip_status": "unavailable"}),
             patch.object(app, "api_post", return_value=response),
         ):
             with self.assertRaisesRegex(ValueError, "不存在的事实编号"):
