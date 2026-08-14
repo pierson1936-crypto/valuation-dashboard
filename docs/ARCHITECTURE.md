@@ -169,6 +169,8 @@ Web 分析本身的进程内状态：
 - `_KEY_LEVEL_CACHE`：按代码缓存独立关键位结果，成功 6 小时、失败或错位 5 分钟；
 - `_INDEX_REFERENCE_CACHE`：缓存 ETF 跟踪指数名称匹配，成功 24 小时，失败短缓存；
 - `_MKT`：缓存市场概览，TTL 120 秒；
+- `_INDUSTRY`：缓存行业板块主力净流入，TTL 120 秒；东财失败时读取
+  `data/industry_flow_snapshot.json` 并标记 `stale=true`，该文件是运行时缓存，不提交；
 - `_MKT_HISTORY`：按需缓存全部指数与板块 ETF 多日日线，TTL 15 分钟；只在组合分析时
   加载，不进入启动预热；
 - 浏览器 `localStorage`：自选代码/名称/分组、当天分组轨迹、页面输入的模型 Key 和
@@ -240,7 +242,7 @@ ETF 上下文先对基金类别读取公开资料；只要存在最近报告期�
 | `GET /api/analyze` | 单标的完整分析；股票附日内概况与公司定位，ETF 附后台 `etf_context` 披露信息 | 行情/估值/F10 等公开接口 |
 | `GET /api/intraday` | 标的与参考指数的当日分时、相对强弱摘要和代表时点；失败不影响主分析 | 腾讯分钟行情、ETF 跟踪指数名称匹配 |
 | `GET /api/key-levels` | 点击后识别近期震荡区间；普通股票另返回本地筹码估算，失败不影响主分析 | 现有前复权 K；股票筹码优先东方财富，失败时 Baostock 前复权日 K 与换手率 |
-| `GET /api/market` | 指数与板块行情 | 腾讯 |
+| `GET /api/market` | 指数与行业板块主力净流入；东财失败时读取快照或回退旧板块 ETF 行情 | 腾讯指数报价、东方财富行业板块资金流 |
 | `GET /api/name` | 自选名称补全 | 腾讯/东方财富 |
 | `GET /api/watch_quotes` | 最多 30 个自选报价 | 腾讯/东方财富 |
 | `GET /api/excel` | Excel 导出 | 数据接口、openpyxl |

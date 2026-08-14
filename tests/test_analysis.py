@@ -493,6 +493,19 @@ class IndependentSecurityReportTests(unittest.TestCase):
         self.assertIn("大盘涨跌快照", serialized)
         self.assertIn("完整分时走势", serialized)
 
+    def test_security_evidence_keeps_industry_flow_semantics(self):
+        market = self.fixed_market()
+        market["stale"] = True
+        market["sectors"] = [{
+            "code": "BK0436", "name": "计算机", "chg": 2.5, "main_net": 8.9,
+        }]
+
+        evidence = app.build_security_ai_evidence(self.fixed_result(), market)
+        flow = next(item for item in evidence if item["topic"] == "行业板块资金流快照")
+
+        self.assertEqual(flow["data"]["items"][0]["main_net_inflow_yi"], 8.9)
+        self.assertTrue(flow["data"]["stale"])
+
     def test_chip_evidence_only_contains_allowed_estimate_fields(self):
         key_levels = {
             "chip_status": "available",

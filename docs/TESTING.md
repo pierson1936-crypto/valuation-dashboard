@@ -10,6 +10,8 @@
 - `test_http.py`：在随机本机端口启动真实 `Handler`，Mock 业务/模型层后验证页面、
   自选分组契约和 API，包括 `/api/intraday`、`/api/key-levels` 与按需单标的
   `/api/security_report`；
+- `test_industry_flow.py`：东方财富行业板块资金流解析、历史资金流、缓存快照降级和
+  `market_overview()` 的兼容字段及主力净流入排序；
 - `fixtures.py`：固定 K 线、估值和标的元数据。
 - `test_monitoring_db.py`：SQLite 重启持久化与分层清理；
 - `test_monitoring_rules.py`：连续确认、回差、重新武装和上下穿；
@@ -42,7 +44,7 @@ python -m pip install -r requirements.txt
 
 ## Mock 边界
 
-- 测试不访问东方财富、腾讯、新浪、Baostock 或任何模型 API。
+- 测试不访问东方财富、腾讯、新浪、Baostock 或任何模型 API；行业快照固定重定向至临时文件。
 - 完整分析测试替换代码识别、K 线、估值、资金流和财务数据函数，但执行真实
   `analyze`、指标计算、报告、风险和响应清洗。
 - HTTP 测试执行真实 `ThreadingHTTPServer` 和 `Handler`，只替换耗时业务函数。
@@ -59,6 +61,7 @@ python -m pip install -r requirements.txt
 - 明显横盘能识别震荡区间，单边上涨不强行画框；筹码估算返回成本区、主要筹码峰和
   0% 至 100% 的估算获利占比；
 - ETF 关键位不读取筹码数据；东方财富筹码输入失败时尝试 Baostock 固定样例；两路前复权收盘价偏差超过 1% 时屏蔽筹码叠加；
+- 行业资金流同时覆盖东财数组/字典响应、历史资金流、快照降级、旧板块 ETF 回退和主力净流入排序；
 - `/api/key-levels` 只有点击后才调用，非法代码在取数前拒绝，首页包含加载/隐藏入口；
 - 东方财富 F10 固定样例的三级行业、最多 4 个概念、主营摘要与地域板块排除；
 - 单标的 AI 只收到连续编号的原始事实，不收到规则报告、风险理由或提醒结论；

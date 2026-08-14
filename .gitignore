@@ -35,12 +35,14 @@ data/*.db
 data/*.db-*
 data/*.sqlite
 data/*.sqlite-*
+data/industry_flow_snapshot.json
 
 # Editor and local agent metadata
 .idea/
 .vscode/
 .codex/
 .agents/
+.workbuddy/
 
 # Operating system
 Thumbs.db

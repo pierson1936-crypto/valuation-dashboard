@@ -19,13 +19,15 @@
 | `monitoring/portfolio_analysis.py` | 共同截止日、趋势/相对强弱、贡献、集中度、相关性、强弱分类和历史诊断重放 | `monitoring/portfolio.py` | 是 | 高 | 诊断重放不是收益回测；质量不足必须显式降级 |
 | `monitoring/portfolio.py` | 组合快照、事实证据目录、0 Token 扫描、两阶段 DeepSeek/GPT 报告、用量、缓存和最近 7 次历史 | Web 持仓页 | 是 | 高 | 第一轮不得接收用户判断；已确认事实只能引用有效 evidence_id |
 | `monitoring/trading_calendar.py` | 本地交易日历读取和交易日判断 | `MonitorService`、Web 状态 | 是 | 中 | 无权威文件时明确使用工作日兜底 |
-| `启动.bat` | 检查 Python/openpyxl 并启动 `app.py` | 用户双击 | 否 | 中 | 兼容入口，不轻易改名 |
+| `启动.bat` | 检查 Python、Excel 导出与筹码备用源依赖并启动 `app.py` | 用户双击 | 否 | 中 | 兼容入口，不轻易改名 |
 | `启动AI助手.bat` | 临时读取 DeepSeek Key 并启动 CLI | 用户双击 | 否 | 中 | 不把输入写入文件 |
 | `启动盯盘.bat` | 持续运行本地盯盘 CLI | 用户双击 | 是 | 中 | 窗口关闭即停止 |
 | `requirements.txt` | Excel 导出和筹码免费备用数据源依赖 | 开发者/pip | 否 | 低 | 核心 Web 其余部分为标准库 |
+| `data/industry_boards.json` | 行业板块重点排序预留配置 | 当前未参与运行时排序 | 否 | 低 | 东财动态全量结果不筛选；不是运行时快照 |
 | `tests/fixtures.py` | 固定 K 线、估值和标的元数据 | `test_analysis.py` | 否 | 低 | 不请求真实接口 |
 | `tests/test_analysis.py` | 分位口径、完整分析、当日分时、震荡区间和筹码估算契约 | unittest | 是 | 低 | 固定数据，不请求真实接口 |
 | `tests/test_http.py` | 随机端口 HTTP/API、按需关键位和内嵌网页契约测试 | unittest | 是 | 低 | Mock 业务与模型调用 |
+| `tests/test_industry_flow.py` | 行业资金流解析、缓存快照降级与市场概览兼容契约 | unittest | 否 | 低 | 使用临时快照和 Mock，不联网 |
 | `tests/test_monitoring_presets.py` | 三线构建、更新隔离和 CLI 总览 | unittest | 是 | 低 | 使用临时数据库 |
 | `tests/test_monitoring_web.py` | Web 后台启停和凭据脱敏 | unittest | 是 | 低 | 不请求真实行情 |
 | `tests/test_monitoring_explanations.py` | 事件复核缓存、严格 JSON 和用量回滚 | unittest | 是 | 低 | 使用假模型 |
