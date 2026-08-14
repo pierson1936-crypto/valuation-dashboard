@@ -29,11 +29,11 @@ echo 使用的 Python 命令: %PYCMD%
 %PYCMD% --version
 echo.
 
-rem 确认 openpyxl（Excel 导出用），没有就装
-%PYCMD% -c "import openpyxl" 1>nul 2>nul
+rem 确认可选组件（Excel 导出、筹码备用数据源），没有就装
+%PYCMD% -c "import openpyxl, baostock" 1>nul 2>nul
 if errorlevel 1 (
-    echo 首次运行，正在安装 Excel 导出组件 openpyxl，请稍候...
-    %PYCMD% -m pip install openpyxl
+    echo 首次运行，正在安装项目组件，请稍候...
+    %PYCMD% -m pip install -r requirements.txt
     echo.
 )
 

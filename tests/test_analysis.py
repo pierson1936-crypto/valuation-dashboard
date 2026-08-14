@@ -67,6 +67,21 @@ class KeyLevelAnalysisTests(unittest.TestCase):
         rows[-1]["date"] = "2026-08-12"
         return rows
 
+    @staticmethod
+    def confirmed_swing_chart():
+        dates = ["2026-06-%02d" % (index + 1) for index in range(60)]
+        candles = []
+        for index in range(60):
+            close = 10.96 + index * 0.002
+            opened = close - 0.03
+            candles.append([opened, close, close - 0.12, close + 0.12])
+        for index in (8, 28, 48):
+            candles[index][2] = 10.4
+        for index in (16, 36, 54):
+            candles[index][3] = 11.8
+        candles[-1] = [11.02, 11.08, 10.96, 11.18]
+        return {"dates": dates, "candle": candles}
+
     def test_clear_sideways_range_is_detected(self):
         result = app.detect_consolidation_box(self.box_chart())
 
@@ -78,6 +93,92 @@ class KeyLevelAnalysisTests(unittest.TestCase):
 
     def test_directional_move_does_not_force_a_box(self):
         self.assertIsNone(app.detect_consolidation_box(self.box_chart(trending=True)))
+
+    def test_confirmed_swing_levels_require_repeated_price_touches(self):
+        result = app.detect_confirmed_swing_levels(self.confirmed_swing_chart())
+
+        self.assertAlmostEqual(result["support"]["price"], 10.4, places=2)
+        self.assertAlmostEqual(result["pressure"]["price"], 11.8, places=2)
+        self.assertGreaterEqual(result["support"]["touches"], 2)
+        self.assertGreaterEqual(result["pressure"]["touches"], 2)
+        self.assertEqual(result["support"]["source"], "swing")
+
+    def test_directional_move_does_not_force_swing_levels(self):
+        result = app.detect_confirmed_swing_levels(self.box_chart(trending=True))
+
+        self.assertIsNone(result["support"])
+        self.assertIsNone(result["pressure"])
+
+    def test_price_structure_keeps_box_as_primary_levels(self):
+        result = app.detect_price_structure(self.box_chart())
+
+        self.assertIsNotNone(result["box"])
+        self.assertEqual(result["support"]["source"], "box")
+        self.assertEqual(result["pressure"]["source"], "box")
+        self.assertEqual(result["support"]["price"], result["box"]["lower"])
+        self.assertEqual(result["pressure"]["price"], result["box"]["upper"])
+
+    def test_chip_kline_fetch_retries_a_transient_disconnect(self):
+        payload = {"data": {"klines": []}}
+        with patch.object(app, "fetch_json", return_value=payload) as fetch:
+            app.fetch_eastmoney_chip_kline("sh", "600000")
+
+        self.assertEqual(fetch.call_args.kwargs["retries"], 2)
+
+    def test_baostock_rows_are_normalized_as_qfq_chip_input(self):
+        rows = app._parse_baostock_chip_kline(
+            ["date", "open", "high", "low", "close", "volume", "turn"],
+            [["2026-08-12", "9.9", "10.2", "9.8", "10.0", "123456", "2.5"]],
+        )
+
+        self.assertEqual(rows, [{
+            "date": "2026-08-12", "open": 9.9, "close": 10.0,
+            "high": 10.2, "low": 9.8, "volume": 123456.0, "turnover_pct": 2.5,
+        }])
+
+    def test_chip_estimate_uses_baostock_only_after_eastmoney_fails(self):
+        with (
+            patch.object(app, "fetch_eastmoney_chip_kline", side_effect=ConnectionError("断开")) as eastmoney,
+            patch.object(app, "fetch_baostock_chip_kline", return_value=self.chip_rows()) as baostock,
+        ):
+            chip = app.estimate_chip_distribution_for_security("sh", "600000")
+
+        self.assertEqual(chip["source"], "baostock")
+        self.assertEqual(chip["source_label"], "Baostock")
+        eastmoney.assert_called_once_with("sh", "600000")
+        baostock.assert_called_once_with("sh", "600000")
+
+    def test_chip_estimate_keeps_eastmoney_when_it_succeeds(self):
+        with (
+            patch.object(app, "fetch_eastmoney_chip_kline", return_value=self.chip_rows()) as eastmoney,
+            patch.object(app, "fetch_baostock_chip_kline") as baostock,
+        ):
+            chip = app.estimate_chip_distribution_for_security("sh", "600000")
+
+        self.assertEqual(chip["source"], "eastmoney")
+        self.assertEqual(chip["source_label"], "东方财富")
+        eastmoney.assert_called_once_with("sh", "600000")
+        baostock.assert_not_called()
+
+    def test_available_chip_result_keeps_its_raw_source_label(self):
+        rows = self.chip_rows()
+        latest = rows[-1]
+        analyzed = {
+            "code": "600000",
+            "name": "固定股票",
+            "date": latest["date"],
+            "is_stock": True,
+            "chart": {
+                "dates": [latest["date"]],
+                "candle": [[latest["open"], latest["close"], latest["low"], latest["high"]]],
+            },
+        }
+        with patch.object(app, "fetch_eastmoney_chip_kline", return_value=rows):
+            result = app.build_key_levels(analyzed)
+
+        self.assertEqual(result["chip_status"], "available")
+        self.assertEqual(result["chip"]["source_label"], "东方财富")
+        self.assertIn("东方财富", result["source_note"])
 
     def test_chip_estimate_reports_ranges_and_provenance_fields(self):
         result = app.estimate_chip_distribution(self.chip_rows())
@@ -127,7 +228,28 @@ class KeyLevelAnalysisTests(unittest.TestCase):
 
         self.assertEqual(result["chip_status"], "not_applicable")
         self.assertIsNone(result["chip"])
+        self.assertIsNotNone(result["support"])
+        self.assertIsNotNone(result["pressure"])
         fetch.assert_not_called()
+
+    def test_explicit_retry_bypasses_only_an_unavailable_cached_result(self):
+        original_cache = dict(app._KEY_LEVEL_CACHE)
+        stale = {"code": "600000", "chip_status": "unavailable"}
+        fresh = {"code": "600000", "chip_status": "available"}
+        try:
+            app._KEY_LEVEL_CACHE.clear()
+            app._KEY_LEVEL_CACHE["600000"] = (app.time.time(), stale)
+            with (
+                patch.object(app, "analyze_cached", return_value={"code": "600000"}),
+                patch.object(app, "build_key_levels", return_value=fresh) as build,
+            ):
+                result = app.key_levels_cached("600000", retry_failure=True)
+        finally:
+            app._KEY_LEVEL_CACHE.clear()
+            app._KEY_LEVEL_CACHE.update(original_cache)
+
+        self.assertEqual(result, fresh)
+        build.assert_called_once()
 
     def test_price_mismatch_blocks_chip_overlay(self):
         rows = self.chip_rows(close_scale=1.25)

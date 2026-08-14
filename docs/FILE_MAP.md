@@ -22,7 +22,7 @@
 | `启动.bat` | 检查 Python/openpyxl 并启动 `app.py` | 用户双击 | 否 | 中 | 兼容入口，不轻易改名 |
 | `启动AI助手.bat` | 临时读取 DeepSeek Key 并启动 CLI | 用户双击 | 否 | 中 | 不把输入写入文件 |
 | `启动盯盘.bat` | 持续运行本地盯盘 CLI | 用户双击 | 是 | 中 | 窗口关闭即停止 |
-| `requirements.txt` | Excel 导出依赖范围 | 开发者/pip | 否 | 低 | 核心 Web 其余部分为标准库 |
+| `requirements.txt` | Excel 导出和筹码免费备用数据源依赖 | 开发者/pip | 否 | 低 | 核心 Web 其余部分为标准库 |
 | `tests/fixtures.py` | 固定 K 线、估值和标的元数据 | `test_analysis.py` | 否 | 低 | 不请求真实接口 |
 | `tests/test_analysis.py` | 分位口径、完整分析、当日分时、震荡区间和筹码估算契约 | unittest | 是 | 低 | 固定数据，不请求真实接口 |
 | `tests/test_http.py` | 随机端口 HTTP/API、按需关键位和内嵌网页契约测试 | unittest | 是 | 低 | Mock 业务与模型调用 |

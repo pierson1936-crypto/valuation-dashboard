@@ -295,6 +295,7 @@ KEY_LEVEL_TTL = 6 * 60 * 60
 KEY_LEVEL_FAILURE_TTL = 5 * 60
 _KEY_LEVEL_CACHE = {}
 _key_level_lock = threading.Lock()
+_baostock_lock = threading.Lock()
 
 
 def _quantile(values, q):
@@ -412,6 +413,138 @@ def detect_consolidation_box(chart):
     }
 
 
+def detect_confirmed_swing_levels(chart, window=80):
+    """Find repeated short-term swing levels without forcing a consolidation box."""
+    dates = list((chart or {}).get("dates") or [])
+    candles = list((chart or {}).get("candle") or [])
+    rows = []
+    for index, candle in enumerate(candles):
+        try:
+            opened, closed, low, high = [float(value) for value in candle[:4]]
+            if min(opened, closed, low, high) <= 0 or high < low:
+                continue
+            rows.append({
+                "date": dates[index] if index < len(dates) else "",
+                "close": closed,
+                "low": low,
+                "high": high,
+            })
+        except (TypeError, ValueError, IndexError):
+            continue
+    if len(rows) < 20:
+        return {"support": None, "pressure": None}
+
+    sample = rows[-min(window, len(rows)):]
+    current = sample[-1]["close"]
+    median_range = _quantile(
+        [row["high"] - row["low"] for row in sample], 0.50
+    ) or 0.0
+    tolerance = max(current * 0.006, median_range * 0.55)
+    extrema = {"support": [], "pressure": []}
+    radius = 2
+    for index in range(radius, len(sample) - radius):
+        row = sample[index]
+        neighbours = sample[index - radius:index] + sample[index + 1:index + radius + 1]
+        if row["low"] < min(item["low"] for item in neighbours):
+            extrema["support"].append((row["low"], index, row["date"]))
+        if row["high"] > max(item["high"] for item in neighbours):
+            extrema["pressure"].append((row["high"], index, row["date"]))
+
+    def confirmed(events, side):
+        clusters = []
+        for event in sorted(events, key=lambda item: item[0]):
+            matching = next(
+                (cluster for cluster in clusters
+                 if abs(event[0] - cluster["price"]) <= tolerance),
+                None,
+            )
+            if matching is None:
+                matching = {"price": event[0], "events": []}
+                clusters.append(matching)
+            matching["events"].append(event)
+            matching["price"] = sum(item[0] for item in matching["events"]) / len(
+                matching["events"]
+            )
+
+        candidates = []
+        for cluster in clusters:
+            separated = []
+            for event in sorted(cluster["events"], key=lambda item: item[1]):
+                if not separated or event[1] - separated[-1][1] >= 5:
+                    separated.append(event)
+            if len(separated) < 2 or separated[-1][1] < len(sample) - 35:
+                continue
+            price = sum(item[0] for item in separated) / len(separated)
+            if side == "support":
+                valid_side = price <= current * 0.997
+            else:
+                valid_side = price >= current * 1.003
+            distance_pct = abs(price / current - 1) * 100
+            if not valid_side or distance_pct > 18:
+                continue
+            candidates.append({
+                "price": round(price, 3),
+                "source": "swing",
+                "touches": len(separated),
+                "start_date": separated[0][2],
+                "end_date": separated[-1][2],
+                "sample_count": len(sample),
+                "distance_pct": round(distance_pct, 1),
+                "_latest": separated[-1][1],
+            })
+        if not candidates:
+            return None
+        chosen = min(
+            candidates,
+            key=lambda item: (item["distance_pct"], -item["touches"], -item["_latest"]),
+        )
+        chosen.pop("_latest", None)
+        return chosen
+
+    return {
+        "support": confirmed(extrema["support"], "support"),
+        "pressure": confirmed(extrema["pressure"], "pressure"),
+    }
+
+
+def detect_price_structure(chart):
+    """Keep a confirmed box primary, then fall back to repeated swing levels."""
+    box = detect_consolidation_box(chart)
+    if box:
+        common = {
+            "source": "box",
+            "start_date": box["start_date"],
+            "end_date": box["end_date"],
+            "sample_count": box["sample_count"],
+        }
+        return {
+            "box": box,
+            "support": {
+                **common,
+                "price": box["lower"],
+                "touches": box["lower_touches"],
+            },
+            "pressure": {
+                **common,
+                "price": box["upper"],
+                "touches": box["upper_touches"],
+            },
+            "structure_note": "支撑与压力采用已确认震荡箱体的上下边界。",
+        }
+    swings = detect_confirmed_swing_levels(chart)
+    has_level = swings["support"] or swings["pressure"]
+    return {
+        "box": None,
+        "support": swings["support"],
+        "pressure": swings["pressure"],
+        "structure_note": (
+            "未形成严格震荡箱体；支撑与压力仅采用至少两次确认的近期波段高低点。"
+            if has_level else
+            "未形成严格震荡箱体，也没有获得至少两次确认的近期波段高低点。"
+        ),
+    }
+
+
 def _parse_eastmoney_chip_kline(payload):
     data = (payload or {}).get("data") or {}
     rows = []
@@ -453,7 +586,87 @@ def fetch_eastmoney_chip_kline(prefix, code, limit=210):
         "lmt": str(limit),
     }
     url = "https://push2his.eastmoney.com/api/qt/stock/kline/get?" + urllib.parse.urlencode(params)
-    return _parse_eastmoney_chip_kline(fetch_json(url, timeout=10, retries=1))
+    return _parse_eastmoney_chip_kline(fetch_json(url, timeout=10, retries=2))
+
+
+def _parse_baostock_chip_kline(columns, raw_rows):
+    """Normalize Baostock qfq daily rows to the local chip-estimate input shape."""
+    rows = []
+    for raw in raw_rows or []:
+        values = dict(zip(columns, raw))
+        try:
+            row = {
+                "date": values["date"],
+                "open": float(values["open"]),
+                "close": float(values["close"]),
+                "high": float(values["high"]),
+                "low": float(values["low"]),
+                "volume": float(values["volume"]),
+                "turnover_pct": float(values["turn"]),
+            }
+            if min(row["open"], row["close"], row["high"], row["low"]) <= 0:
+                continue
+            if row["high"] < row["low"] or row["turnover_pct"] < 0:
+                continue
+            rows.append(row)
+        except (KeyError, TypeError, ValueError):
+            continue
+    rows.sort(key=lambda row: row["date"])
+    return rows
+
+
+def fetch_baostock_chip_kline(prefix, code, limit=210):
+    """Fetch qfq daily OHLC and turnover from the free Baostock fallback."""
+    try:
+        import baostock as bs
+    except ImportError as exc:
+        raise RuntimeError("免费备用数据组件 Baostock 未安装") from exc
+
+    market = "sh" if prefix == "sh" else ("bj" if prefix == "bj" else "sz")
+    start = (date.today() - timedelta(days=max(400, int(limit * 2.2)))).strftime("%Y-%m-%d")
+    end = date.today().strftime("%Y-%m-%d")
+    fields = "date,open,high,low,close,volume,turn"
+    # Baostock keeps session state globally, so concurrent HTTP requests share one session safely.
+    with _baostock_lock:
+        login = bs.login()
+        if str(getattr(login, "error_code", "-1")) != "0":
+            raise ValueError("Baostock 登录失败：%s" % getattr(login, "error_msg", "未知错误"))
+        try:
+            response = bs.query_history_k_data_plus(
+                "%s.%s" % (market, code), fields,
+                start_date=start, end_date=end, frequency="d", adjustflag="2",
+            )
+            if str(getattr(response, "error_code", "-1")) != "0":
+                raise ValueError(
+                    "Baostock 日线请求失败：%s" % getattr(response, "error_msg", "未知错误")
+                )
+            raw_rows = []
+            while response.next():
+                raw_rows.append(response.get_row_data())
+        finally:
+            try:
+                bs.logout()
+            except Exception:
+                pass
+    return _parse_baostock_chip_kline(fields.split(","), raw_rows)[-limit:]
+
+
+def estimate_chip_distribution_for_security(prefix, code):
+    """Estimate from the primary public source, then the independent free fallback."""
+    errors = []
+    sources = (
+        ("eastmoney", "东方财富", fetch_eastmoney_chip_kline),
+        ("baostock", "Baostock", fetch_baostock_chip_kline),
+    )
+    for source, label, fetcher in sources:
+        try:
+            chip = estimate_chip_distribution(fetcher(prefix, code))
+            chip["source"] = source
+            chip["source_label"] = label
+            return chip
+        except Exception as exc:
+            errors.append("%s：%s" % (label, str(exc)))
+    raise ValueError("；".join(errors) or "筹码原始数据不可用")
 
 
 def estimate_chip_distribution(rows, window=120, bins=150):
@@ -547,7 +760,7 @@ def estimate_chip_distribution(rows, window=120, bins=150):
     }
 
 
-def _describe_chip_peak(chip, box):
+def _describe_chip_peak(chip, box, support=None, pressure=None):
     """Describe one estimated cost-density peak without promoting it to a price level."""
     current = float(chip["latest_close"])
     peak = float(chip["peak_price"])
@@ -563,15 +776,24 @@ def _describe_chip_peak(chip, box):
 
     overlap = None
     overlap_note = "暂无可交叉验证的 K 线支撑或压力区。"
-    if box:
+    if box or support or pressure:
         overlap_note = "未与已识别的 K 线支撑或压力区重合。"
-        lower = float(box["lower"])
-        upper = float(box["upper"])
-        tolerance = max((upper - lower) * 0.08, current * 0.004)
-        candidates = [
-            (abs(peak - lower), "support", "筹码峰与 K 线可能支撑重合，筹码重合，参考增强。"),
-            (abs(peak - upper), "pressure", "筹码峰与 K 线可能压力重合，筹码重合，参考增强。"),
-        ]
+        support_price = (
+            float(support["price"]) if support else
+            (float(box["lower"]) if box else None)
+        )
+        pressure_price = (
+            float(pressure["price"]) if pressure else
+            (float(box["upper"]) if box else None)
+        )
+        tolerance = current * 0.004
+        if box:
+            tolerance = max((float(box["upper"]) - float(box["lower"])) * 0.08, tolerance)
+        candidates = []
+        if support_price is not None:
+            candidates.append((abs(peak - support_price), "support", "筹码峰与 K 线可能支撑重合，筹码重合，参考增强。"))
+        if pressure_price is not None:
+            candidates.append((abs(peak - pressure_price), "pressure", "筹码峰与 K 线可能压力重合，筹码重合，参考增强。"))
         distance, candidate, note = min(candidates, key=lambda item: item[0])
         if distance <= tolerance:
             overlap = candidate
@@ -588,15 +810,19 @@ def _describe_chip_peak(chip, box):
 def build_key_levels(analyzed):
     """Build an isolated, display-only key-level result from existing chart data."""
     chart = (analyzed or {}).get("chart") or {}
+    structure = detect_price_structure(chart)
     result = {
         "code": analyzed.get("code", ""),
         "name": analyzed.get("name", ""),
         "date": analyzed.get("date", ""),
-        "box": detect_consolidation_box(chart),
+        "box": structure["box"],
+        "support": structure["support"],
+        "pressure": structure["pressure"],
+        "structure_note": structure["structure_note"],
         "chip": None,
         "chip_status": "not_applicable",
         "box_note": "仅在近期价格多次触及上下边界且方向性较弱时显示，未识别到时不会强行画框。",
-        "source_note": "震荡区间来自页面现有前复权日 K；筹码来自东方财富前复权日 K 与换手率的公开算法估算。",
+        "source_note": "震荡区间来自页面现有前复权日 K；筹码按前复权日 K 与换手率在本地估算。",
     }
     if not analyzed.get("is_stock"):
         result["chip_note"] = "ETF 存在申购赎回，第一版不展示可能失真的筹码估算。"
@@ -605,7 +831,7 @@ def build_key_levels(analyzed):
     code = str(analyzed.get("code") or "")
     prefix = "sh" if code.startswith("6") else ("bj" if code.startswith(("8", "9")) else "sz")
     try:
-        chip = estimate_chip_distribution(fetch_eastmoney_chip_kline(prefix, code))
+        chip = estimate_chip_distribution_for_security(prefix, code)
         page_dates = chart.get("dates") or []
         page_candles = chart.get("candle") or []
         page_date = str(page_dates[-1]) if page_dates else str(analyzed.get("date") or "")
@@ -627,7 +853,13 @@ def build_key_levels(analyzed):
                 relation = "当前价格位于估算主要成本区内，供需可能较密集，方向仍需结合后续量价确认。"
             chip["relation_note"] = relation
             chip["method_note"] = "按最近约 120 个交易日的换手衰减与日内价格分布估算，非真实账户持仓成本。"
-            chip.update(_describe_chip_peak(chip, result["box"]))
+            result["source_note"] = (
+                "震荡区间来自页面现有前复权日 K；筹码原始数据来自%s前复权日 K 与换手率，"
+                "再由本地模型估算。" % chip["source_label"]
+            )
+            chip.update(_describe_chip_peak(
+                chip, result["box"], result["support"], result["pressure"]
+            ))
             result["chip"] = chip
             result["chip_status"] = "available"
             result["chip_note"] = "估算获利比例只描述模型中低于现价的筹码占比，不能证明持有人正在兑现。"
@@ -637,7 +869,7 @@ def build_key_levels(analyzed):
     return _clean(result)
 
 
-def key_levels_cached(code):
+def key_levels_cached(code, retry_failure=False):
     code = str(code or "").strip()
     now = time.time()
     with _key_level_lock:
@@ -645,7 +877,8 @@ def key_levels_cached(code):
         if cached:
             cached_at, value = cached
             ttl = KEY_LEVEL_TTL if value.get("chip_status") in {"available", "not_applicable"} else KEY_LEVEL_FAILURE_TTL
-            if now - cached_at < ttl:
+            retry_unavailable = retry_failure and value.get("chip_status") == "unavailable"
+            if not retry_unavailable and now - cached_at < ttl:
                 return value
     analyzed = analyze_cached(code)
     if analyzed.get("error"):
@@ -4057,17 +4290,18 @@ function keyLevelBoxStatus(box){
 }
 function renderKeyLevelSummary(data,view){
  const box=g('keyLevelSummary');if(!box)return;
- const range=data.box,chip=data.chip,items=[];
+ const range=data.box,support=data.support,pressure=data.pressure,chip=data.chip,items=[];
  if(view==='structure'){
-  if(!range){box.innerHTML=`<div class="key-level-text">暂无清晰短线结构</div><div class="key-level-note">${escHtml(data.box_note||'没有清晰结构时不强行画线。')} 结果仅用于图表观察。</div>`;box.className='key-level-summary visible';return;}
-  items.push(['可能支撑',marketNum(range.lower,3)]);
-  items.push(['可能压力',marketNum(range.upper,3)]);
-  items.push(['近期震荡箱体',`${marketNum(range.lower,3)} ~ ${marketNum(range.upper,3)}`]);
-  items.push(['当前所处位置',keyLevelBoxStatus(range)]);
-  box.innerHTML=`<div class="key-level-grid">${items.map(([label,value])=>`<div class="key-level-item"><span>${escHtml(label)}</span><strong>${escHtml(value)}</strong></div>`).join('')}</div><div class="key-level-note">${escHtml(data.box_note||'')} 支撑与压力来自价格结构，不由筹码单独决定。</div>`;
+  if(!range&&!support&&!pressure){box.innerHTML=`<div class="key-level-text">暂无清晰短线结构</div><div class="key-level-note">${escHtml(data.structure_note||data.box_note||'没有清晰结构时不强行画线。')} 结果仅用于图表观察。</div>`;box.className='key-level-summary visible';return;}
+  items.push(['可能支撑',support?marketNum(support.price,3):'暂无确认']);
+  items.push(['可能压力',pressure?marketNum(pressure.price,3):'暂无确认']);
+  items.push(['近期震荡箱体',range?`${marketNum(range.lower,3)} ~ ${marketNum(range.upper,3)}`:'未形成']);
+  items.push(['当前所处位置',range?keyLevelBoxStatus(range):'参考近期波段位置']);
+  box.innerHTML=`<div class="key-level-grid">${items.map(([label,value])=>`<div class="key-level-item"><span>${escHtml(label)}</span><strong>${escHtml(value)}</strong></div>`).join('')}</div><div class="key-level-note">${escHtml(data.structure_note||data.box_note||'')} 支撑与压力来自价格结构，不由筹码单独决定。</div>`;
  }else if(chip){
   items.push(['主要估算成本密集区',marketNum(chip.peak_price,3)]);
   items.push(['相对现价',chip.peak_position||'—']);
+  items.push(['原始数据',chip.source_label||'—']);
   items.push(['数据日期',chip.as_of||'—']);
   items.push(['样本',`${chip.sample_count||'—'} 日`]);
   const detail=[chip.peak_relation_note,chip.structure_overlap_note].filter(Boolean).map(escHtml).join(' ');
@@ -4079,11 +4313,11 @@ function renderKeyLevelSummary(data,view){
  box.className='key-level-summary visible';
 }
 function keyLevelChartMarks(c,data,view){
- const lines=[],areas=[],range=data&&data.box,chip=data&&data.chip;
- if(view==='structure'&&range){
-  lines.push({name:'可能支撑',yAxis:range.lower,lineStyle:{color:'#34d399',type:'dashed'},label:{formatter:'可能支撑 {c}',color:'#86efac'}});
-  lines.push({name:'可能压力',yAxis:range.upper,lineStyle:{color:'#f59e0b',type:'dashed'},label:{formatter:'可能压力 {c}',color:'#fcd34d'}});
-  areas.push([{name:'近期震荡区',xAxis:range.start_date,yAxis:range.lower,itemStyle:{color:'rgba(96,165,250,.08)'},label:{show:false}},{xAxis:range.end_date||(c.dates||[]).at(-1),yAxis:range.upper}]);
+ const lines=[],areas=[],range=data&&data.box,support=data&&data.support,pressure=data&&data.pressure,chip=data&&data.chip;
+ if(view==='structure'){
+  if(support)lines.push({name:'可能支撑',yAxis:support.price,lineStyle:{color:'#34d399',type:'dashed'},label:{formatter:'可能支撑 {c}',color:'#86efac'}});
+  if(pressure)lines.push({name:'可能压力',yAxis:pressure.price,lineStyle:{color:'#f59e0b',type:'dashed'},label:{formatter:'可能压力 {c}',color:'#fcd34d'}});
+  if(range)areas.push([{name:'近期震荡区',xAxis:range.start_date,yAxis:range.lower,itemStyle:{color:'rgba(96,165,250,.08)'},label:{show:false}},{xAxis:range.end_date||(c.dates||[]).at(-1),yAxis:range.upper}]);
  }
  if(view==='chip'&&chip){
   lines.push({name:'估算成本密集区',yAxis:chip.peak_price,lineStyle:{color:'#fb7185',width:1.3},label:{formatter:'成本密集区 {c}',color:'#fda4af'}});
@@ -4099,7 +4333,7 @@ function renderChipProfile(){
  securityChart.setOption({graphic:graphics},{replaceMerge:['graphic']});
 }
 function updateKeyLevelButtons(loading=false){
- document.querySelectorAll('[data-key-view]').forEach(btn=>{const active=currentKeyLevelView===btn.dataset.keyView;btn.classList.toggle('active',active);btn.setAttribute('aria-pressed',active?'true':'false');btn.disabled=loading;});
+ document.querySelectorAll('[data-key-view]').forEach(btn=>{const active=currentKeyLevelView===btn.dataset.keyView;btn.classList.toggle('active',active);btn.setAttribute('aria-pressed',active?'true':'false');btn.disabled=loading;const label=btn.querySelector('span');if(label)label.textContent=btn.dataset.keyView==='chip'&&currentKeyLevels&&currentKeyLevels.chip_status==='unavailable'&&!active?'重试筹码结构':(btn.dataset.keyView==='chip'?'筹码结构':'K线结构');});
 }
 function applyKeyLevelView(view){
  currentKeyLevelView=currentKeyLevelView===view?null:view;
@@ -4109,11 +4343,12 @@ function applyKeyLevelView(view){
 }
 async function toggleKeyLevelView(code,view){
  if(code!==cur||!['structure','chip'].includes(view)||(view==='chip'&&!currentSecurityResult.is_stock))return;
- if(currentKeyLevels){applyKeyLevelView(view);return;}
+ const retryUnavailableChip=view==='chip'&&currentKeyLevels&&currentKeyLevels.chip_status==='unavailable'&&currentKeyLevelView!==view;
+ if(currentKeyLevels&&!retryUnavailableChip){applyKeyLevelView(view);return;}
  if(keyLevelRequest&&keyLevelRequest.code===code)return;
  const requestState={code};keyLevelRequest=requestState;updateKeyLevelButtons(true);
  try{
-  const response=await fetch('/api/key-levels?code='+encodeURIComponent(code));
+  const response=await fetch('/api/key-levels?code='+encodeURIComponent(code)+(retryUnavailableChip?'&retry=1':''));
   const data=await response.json();
   if(code!==cur)return;if(data.error)throw new Error(data.error);
   currentKeyLevels=data;applyKeyLevelView(view);
@@ -4129,7 +4364,7 @@ function drawChart(r){
  const opt={
   backgroundColor:'transparent',
   animation:false,
-  legend:{top:0,textStyle:{color:'#8ea0bd'},
+  legend:{top:0,left:52,textStyle:{color:'#8ea0bd'},
     data:['K线','MA5','MA20','MA60']},
   tooltip:{trigger:'axis',axisPointer:{type:'cross'},formatter:params=>klineTooltip(params,c,dailyPct)},
   axisPointer:{link:[{xAxisIndex:'all'}]},
@@ -4445,7 +4680,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not re.fullmatch(r"\d{6}", code):
                     self._send(json.dumps({"error": "请输入6位数字代码"}, ensure_ascii=False).encode("utf-8"))
                 else:
-                    self._send(json.dumps(key_levels_cached(code), ensure_ascii=False).encode("utf-8"))
+                    retry_failure = (qs.get("retry", [""])[0]).strip() == "1"
+                    self._send(json.dumps(
+                        key_levels_cached(code, retry_failure=retry_failure),
+                        ensure_ascii=False,
+                    ).encode("utf-8"))
             elif u.path == "/api/market":
                 self._send(json.dumps(market_overview(), ensure_ascii=False).encode("utf-8"))
             elif u.path == "/api/name":

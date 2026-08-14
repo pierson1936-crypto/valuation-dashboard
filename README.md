@@ -24,7 +24,7 @@
 
 ## 技术栈
 
-- Python 3，标准库 HTTP 服务、并发、网络请求和指标计算；
+- Python 3，标准库 HTTP 服务、并发、网络请求和指标计算；`baostock` 仅用于筹码估算的免费备用日线源；
 - 原生 HTML/CSS/JavaScript，内嵌于 `app.py`；
 - ECharts 5（从 jsDelivr CDN 运行时加载）；
 - `openpyxl`（仅 Excel 导出）；
@@ -45,7 +45,7 @@ python -m pip install -r requirements.txt
 
 ## 配置
 
-基础分析无需配置。AI 功能使用以下环境变量：
+基础分析无需配置。筹码估算优先使用东方财富；瞬时失败时自动尝试免费 Baostock，二者都不需要用户账号或 Token。AI 功能使用以下环境变量：
 
 | 变量 | 用途 | 必需 |
 | --- | --- | --- |
