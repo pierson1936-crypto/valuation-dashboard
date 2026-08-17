@@ -3883,7 +3883,7 @@ button:hover{background:#1d4ed8} button.g{background:#059669} button.g:hover{bac
 .market-context{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border-top:1px solid #1c2740}.market-context.single{grid-template-columns:1fr}.market-context-pane{min-width:0;padding:14px 16px 4px}.market-context-pane:first-child{border-right:1px solid #1c2740}.market-context.single .market-context-pane:first-child{border-right:0}.market-context-pane h3{margin:0 0 10px;color:#dce7f7;font-size:13px}.context-line{display:flex;align-items:flex-start;gap:8px;margin:7px 0;font-size:13px;line-height:1.6}.context-line span{flex:0 0 auto;color:#7183a0}.context-line strong{color:#dce7f7;font-weight:600}.context-tags{display:flex;flex-wrap:wrap;gap:6px;margin:9px 0}.context-tag{padding:3px 7px;border:1px solid #2b3a52;border-radius:5px;background:#172033;color:#b9c7db;font-size:11px}.context-summary{margin:7px 0;color:#9fb0c8;font-size:12px;line-height:1.65}.context-note{margin-top:10px;padding-top:8px;border-top:1px solid #1c2740;color:#64748b;font-size:10px;line-height:1.55}
 @media(max-width:720px){.market-context{grid-template-columns:1fr}.market-context-pane:first-child{border-right:0;border-bottom:1px solid #1c2740}}
 .intraday-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.intraday-head .sec-title{margin-bottom:3px}.intraday-state{min-height:18px;color:#7183a0;font-size:11px}.intraday-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid #22304a;border-bottom:1px solid #22304a;margin:11px 0 4px}.intraday-stat{min-width:0;padding:9px 10px}.intraday-stat+.intraday-stat{border-left:1px solid #22304a}.intraday-stat span{display:block;color:#7183a0;font-size:10px}.intraday-stat strong{display:block;margin-top:4px;color:#dce7f7;font-size:14px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.intraday-chart{height:350px;min-width:0}.intraday-note{color:#64748b;font-size:10px;line-height:1.55}.intraday-error{padding:18px 0;color:#7183a0;font-size:12px}.intraday-up{color:#f2495c!important}.intraday-down{color:#2ec26e!important}
-.key-level-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.key-level-head .sec-title{margin-bottom:3px}.key-level-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.key-level-button{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:7px 11px;border-radius:7px;font-size:12px;background:#17243a;border:1px solid #2b3a52;color:#c8ddff}.key-level-button:hover{background:#223b5c}.key-level-button.active{background:#1e3a5f;border-color:#60a5fa;color:#eff6ff}.key-level-button:disabled{opacity:.55;cursor:wait}.key-level-button svg{width:15px;height:15px}.key-level-summary{display:none;margin:10px 0 4px;border-top:1px solid #22304a;border-bottom:1px solid #22304a}.key-level-summary.visible{display:block}.key-level-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}.key-level-item{min-width:0;padding:9px 10px}.key-level-item+.key-level-item{border-left:1px solid #22304a}.key-level-item span{display:block;color:#7183a0;font-size:10px}.key-level-item strong{display:block;margin-top:4px;color:#dce7f7;font-size:13px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.key-level-text{padding:9px 10px;border-top:1px solid #1c2740;color:#8ea0bd;font-size:11px;line-height:1.6}.key-level-text:first-child{border-top:0}.key-level-text.warn{color:#fbbf24}.key-level-note{padding:0 10px 9px;color:#64748b;font-size:10px;line-height:1.55}
+.key-level-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.key-level-head .sec-title{margin-bottom:3px}.key-level-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.key-level-button{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:7px 11px;border-radius:7px;font-size:12px;background:#17243a;border:1px solid #2b3a52;color:#c8ddff}.key-level-button:hover{background:#223b5c}.key-level-button.active{background:#1e3a5f;border-color:#60a5fa;color:#eff6ff}.key-level-button:disabled{opacity:.55;cursor:wait}.key-level-button svg{width:15px;height:15px}.key-level-summary{display:none;margin:10px 0 4px;border-top:1px solid #22304a;border-bottom:1px solid #22304a}.key-level-summary.visible{display:block}.key-level-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}.key-level-item{min-width:0;padding:9px 10px}.key-level-item+.key-level-item{border-left:1px solid #22304a}.key-level-item span{display:block;color:#7183a0;font-size:10px}.key-level-item strong{display:block;margin-top:4px;color:#dce7f7;font-size:13px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.key-level-text{padding:9px 10px;border-top:1px solid #1c2740;color:#8ea0bd;font-size:11px;line-height:1.6}.key-level-text:first-child{border-top:0}.key-level-text.warn{color:#fbbf24}.key-level-pivots{border-top:1px solid #1c2740;padding:8px 10px;color:#8ea0bd;font-size:11px;line-height:1.6}.key-level-pivots summary{cursor:pointer;color:#aabbd2}.key-level-pivots>div{padding-top:6px}.key-level-note{padding:0 10px 9px;color:#64748b;font-size:10px;line-height:1.55}
 @media(max-width:720px){.intraday-stats{grid-template-columns:1fr 1fr}.intraday-stat:nth-child(3){border-left:0;border-top:1px solid #22304a}.intraday-stat:nth-child(4){border-top:1px solid #22304a}.intraday-chart{height:300px}}
 .report p{margin:7px 0;line-height:1.7;font-size:14px;color:#b6c3d9}
 .report .grp{margin-bottom:14px} .report .lbl{color:#7b8aa6;font-size:13px;font-weight:600;margin-bottom:3px}
@@ -4990,9 +4990,10 @@ function renderKeyLevelSummary(data,view){
   items.push(['可能支撑',support?marketNum(support.price,3):'暂无确认']);
   items.push(['可能压力',pressure?marketNum(pressure.price,3):'暂无确认']);
   items.push(['震荡箱体',range?`${marketNum(range.lower,3)} ~ ${marketNum(range.upper,3)}`:'未形成']);
-  const pivots=Array.isArray(priceAction.pivot_points)?priceAction.pivot_points:[],pivotText=pivots.map(item=>`${item.code} ${marketNum(item.price,3)}`).join(' · ');
-  const detail=[priceAction.detail,priceAction.event,pivotText?`近期波段：${pivotText}`:''].filter(Boolean).map(escHtml).join('<br>');
-  box.innerHTML=`<div class="key-level-grid">${items.map(([label,value])=>`<div class="key-level-item"><span>${escHtml(label)}</span><strong>${escHtml(value)}</strong></div>`).join('')}</div>${detail?`<div class="key-level-text">${detail}</div>`:''}<div class="key-level-note">${escHtml(data.structure_note||data.box_note||'')} 淡色区域是最近波段或20日区间观察区，未达到重复确认条件时不称为支撑压力。</div>`;
+  const pivots=Array.isArray(priceAction.pivot_points)?priceAction.pivot_points:[];
+  const pivotText=pivots.map(item=>[item.label||'波段点',item.date,marketNum(item.price,3)].filter(Boolean).join(' ')).join(' · ');
+  const detail=[`结构结论：${priceAction.regime||'等待更多数据'}。`,priceAction.detail,priceAction.event].filter(Boolean).map(escHtml).join('<br>');
+  box.innerHTML=`<div class="key-level-grid">${items.map(([label,value])=>`<div class="key-level-item"><span>${escHtml(label)}</span><strong>${escHtml(value)}</strong></div>`).join('')}</div>${detail?`<div class="key-level-text">${detail}</div>`:''}${pivotText?`<details class="key-level-pivots"><summary>近期波段详情</summary><div>${escHtml(pivotText)}</div></details>`:''}<div class="key-level-note">${escHtml(data.structure_note||data.box_note||'')} 蓝色实线边框区域为已确认震荡区间；绿色或黄色虚线边框区域仅为未确认观察区。</div>`;
  }else if(chip){
   items.push(['主要估算成本密集区',marketNum(chip.peak_price,3)]);
   items.push(['相对现价',chip.peak_position||'—']);
@@ -5008,24 +5009,19 @@ function renderKeyLevelSummary(data,view){
  box.className='key-level-summary visible';
 }
 function keyLevelChartMarks(c,data,view){
- const lines=[],areas=[],points=[],range=data&&data.box,support=data&&data.support,pressure=data&&data.pressure,chip=data&&data.chip,priceAction=data&&data.price_action||{};
+ const lines=[],areas=[],range=data&&data.box,support=data&&data.support,pressure=data&&data.pressure,chip=data&&data.chip,priceAction=data&&data.price_action||{};
  if(view==='structure'){
-  if(support)lines.push({name:'可能支撑',yAxis:support.price,lineStyle:{color:'#34d399',type:'dashed'},label:{formatter:'可能支撑 {c}',color:'#86efac'}});
-  if(pressure)lines.push({name:'可能压力',yAxis:pressure.price,lineStyle:{color:'#f59e0b',type:'dashed'},label:{formatter:'可能压力 {c}',color:'#fcd34d'}});
-  if(range)areas.push([{name:'近期震荡区',xAxis:range.start_date,yAxis:range.lower,itemStyle:{color:'rgba(96,165,250,.08)'},label:{show:false}},{xAxis:range.end_date||(c.dates||[]).at(-1),yAxis:range.upper}]);
-  const addZone=(zone,name,color)=>{if(zone)areas.push([{name,xAxis:zone.start_date,yAxis:zone.lower,itemStyle:{color},label:{show:false}},{xAxis:zone.end_date||(c.dates||[]).at(-1),yAxis:zone.upper}]);};
-  if(!range&&!support)addZone(priceAction.support_zone,'承接观察区','rgba(52,211,153,.09)');
-  if(!range&&!pressure)addZone(priceAction.pressure_zone,'压力观察区','rgba(245,158,11,.09)');
-  (Array.isArray(priceAction.pivot_points)?priceAction.pivot_points:[]).forEach(item=>points.push({
-    name:item.label,value:item.price,coord:[item.date,item.price],symbol:'circle',symbolSize:8,
-    itemStyle:{color:item.kind==='high'?'#f59e0b':'#34d399',borderColor:'#0b111c',borderWidth:1},
-    label:{show:true,formatter:item.code,color:item.kind==='high'?'#fcd34d':'#86efac',fontSize:9,position:item.kind==='high'?'top':'bottom'}
-  }));
+  if(support)lines.push({name:'可能支撑',yAxis:support.price,lineStyle:{color:'#34d399',type:'dashed'}});
+  if(pressure)lines.push({name:'可能压力',yAxis:pressure.price,lineStyle:{color:'#f59e0b',type:'dashed'}});
+  if(range)areas.push([{name:'已确认震荡区间',xAxis:range.start_date,yAxis:range.lower,itemStyle:{color:'rgba(96,165,250,.08)',borderColor:'#60a5fa',borderWidth:1},label:{show:false}},{xAxis:range.end_date||(c.dates||[]).at(-1),yAxis:range.upper}]);
+  const addObservationZone=(zone,name,color,borderColor)=>{if(zone)areas.push([{name,xAxis:zone.start_date,yAxis:zone.lower,itemStyle:{color,borderColor,borderWidth:1,borderType:'dashed'},label:{show:false}},{xAxis:zone.end_date||(c.dates||[]).at(-1),yAxis:zone.upper}]);};
+  if(!range&&!support)addObservationZone(priceAction.support_zone,'承接观察区','rgba(52,211,153,.035)','#6ee7b7');
+  if(!range&&!pressure)addObservationZone(priceAction.pressure_zone,'压力观察区','rgba(245,158,11,.035)','#fcd34d');
  }
  if(view==='chip'&&chip){
-  lines.push({name:'估算成本密集区',yAxis:chip.peak_price,lineStyle:{color:'#fb7185',width:1.3},label:{formatter:'成本密集区 {c}',color:'#fda4af'}});
+  lines.push({name:'估算成本密集区',yAxis:chip.peak_price,lineStyle:{color:'#fb7185',width:1.3}});
  }
- return {lines,areas,points};
+ return {lines,areas};
 }
 function renderChipProfile(){
  if(!securityChart||currentKeyLevelView!=='chip'||!currentKeyLevels||!currentKeyLevels.chip)return;
@@ -5091,8 +5087,7 @@ function drawChart(r){
   series:[
    {name:'K线',type:'candlestick',data:c.candle,
      itemStyle:{color:'#f2495c',color0:'#2ec26e',borderColor:'#f2495c',borderColor0:'#2ec26e'},
-     markPoint:{silent:true,data:marks.points},
-     markLine:{silent:true,symbol:'none',data:marks.lines,label:{fontSize:10,position:'insideEndTop'}},
+     markLine:{silent:true,symbol:'none',data:marks.lines,label:{show:false}},
      markArea:{silent:true,data:marks.areas}},
    {name:'MA5',type:'line',data:c.ma5,smooth:true,showSymbol:false,lineStyle:{width:1,color:'#e6b422'}},
    {name:'MA20',type:'line',data:c.ma20,smooth:true,showSymbol:false,lineStyle:{width:1,color:'#42a5f5'}},
