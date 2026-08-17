@@ -4,10 +4,23 @@
 
 ## 2026-08-17 当前开发分支交接
 
-- 当前工作分支为 `codex/market-quadrant-kline-structure-mvp`，最新功能提交为 `e8a73ac`；
-  分支工作区干净，已推送并与
-  `origin/codex/market-quadrant-kline-structure-mvp` 同步。`main@4cb4441` 仍保持
-  `v0.2.0` 基线，尚未合并本轮功能；
+- K 线结构视图完成仅呈现层的层级收敛：主图不再绘制 HH/HL/LH/LL 波段圆点、英文缩写或
+  支撑/压力/区间文字，只保留线和区间的视觉标记；摘要直接显示中文结构结论、确认程度和
+  价格，近期波段改为可展开的中文详情。严格震荡箱体使用蓝色实线边框，绿色/黄色观察区
+  降低填充并使用虚线边框；未修改波段识别、支撑压力确认、筹码取数或任何计算口径。
+- 本次呈现层改动的 `tests.test_analysis` 与 `tests.test_http` 共 66 项通过，`app.py` 编译和
+  `git diff --check` 通过。独立端口 `8694` 真实页面验收覆盖 `600519` 的已确认箱体与
+  `002273` 的未形成箱体场景：主图不再显示 LH/LL，摘要和展开详情可用，页面无横向溢出。
+  验收未调用 AI、未使用或修改 `data/monitor.db`；筹码免费源在验收期间仍可能失败，但不影响
+  原始 K 线和结构视图。
+- 完整 `unittest discover` 本次运行 190 项，其中 189 项通过；唯一错误为
+  `test_first_stage_cannot_see_locked_user_judgment_and_cache_is_reused`，其假模型读取不到预期的
+  `pending` 持仓报告记录。该调用链位于未改动的 `monitoring/portfolio.py` 与
+  `tests/test_portfolio.py`，需作为独立持仓报告测试问题诊断，不随本次 K 线呈现层调整修改。
+- 本次呈现层调整位于独立分支 `codex/kline-presentation-hierarchy`，从
+  `codex/market-quadrant-kline-structure-mvp@d6c7cf1` 创建，尚未推送。后者的最新功能提交为
+  `e8a73ac`，其本地与 `origin/codex/market-quadrant-kline-structure-mvp` 保持同步；
+  `main@4cb4441` 仍保持 `v0.2.0` 基线，尚未合并当前功能；
 - K 线结构在严格震荡箱体之外新增保守价格行为回退：显示上行/下行/震荡过渡状态、
   20 日位置、HH/HL/LH/LL 波段点、近期突破状态和观察区。观察区不会冒充已确认支撑或压力；
   相关 4 项定向测试通过；
@@ -17,9 +30,10 @@
 - 行业资金为最近完整快照时，只显示黄色状态提示，不再对行业涨跌区整体降透明或灰化。
   当前页面已在 `540×672` 和 `1280×720` 检查：SVG 非空、行业红绿原色正常、无横向溢出、
   文字未超出图形区域、控制台无警告或错误；首页前端契约定向测试 1 项通过；
-- `feat/key-level-view-toggle@2f48467`、`feature/industry-fund-flow@97ebf26` 和当前工作分支
-  均已推送远端，本地/远端差异为 `0/0`。当前开发分支已经包含前两项功能提交，后续接手
-  不要从旧功能分支重复开发，也不要因分支名仍含 `market-quadrant` 而误判当前页面仍是四象限。
+- `feat/key-level-view-toggle@2f48467`、`feature/industry-fund-flow@97ebf26` 和父功能分支
+  `codex/market-quadrant-kline-structure-mvp` 均已推送远端，本地/远端差异为 `0/0`。父功能分支
+  已经包含前两项功能提交，后续接手不要从旧功能分支重复开发，也不要因其分支名仍含
+  `market-quadrant` 而误判当前页面仍是四象限。
 
 ## 2026-08-17 行业资金流免费主备源
 
