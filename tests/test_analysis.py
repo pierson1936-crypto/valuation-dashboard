@@ -118,6 +118,17 @@ class KeyLevelAnalysisTests(unittest.TestCase):
         self.assertEqual(result["support"]["price"], result["box"]["lower"])
         self.assertEqual(result["pressure"]["price"], result["box"]["upper"])
 
+    def test_directional_move_still_returns_price_action_context(self):
+        result = app.detect_price_structure(self.box_chart(trending=True))
+
+        self.assertIsNone(result["box"])
+        self.assertIsNone(result["support"])
+        self.assertIsNone(result["pressure"])
+        self.assertEqual(result["price_action"]["regime"], "上行结构")
+        self.assertIsNotNone(result["price_action"]["support_zone"])
+        self.assertIsNotNone(result["price_action"]["pressure_zone"])
+        self.assertIn("20日", result["price_action"]["event"])
+
     def test_chip_kline_fetch_retries_a_transient_disconnect(self):
         payload = {"data": {"klines": []}}
         with patch.object(app, "fetch_json", return_value=payload) as fetch:
@@ -230,6 +241,23 @@ class KeyLevelAnalysisTests(unittest.TestCase):
         self.assertIsNone(result["chip"])
         self.assertIsNotNone(result["support"])
         self.assertIsNotNone(result["pressure"])
+        fetch.assert_not_called()
+
+    def test_etf_directional_chart_keeps_price_action_without_forced_levels(self):
+        analyzed = {
+            "code": "159326",
+            "name": "固定 ETF",
+            "date": "2026-08-12",
+            "is_stock": False,
+            "chart": self.box_chart(trending=True),
+        }
+        with patch.object(app, "fetch_eastmoney_chip_kline") as fetch:
+            result = app.build_key_levels(analyzed)
+
+        self.assertIsNone(result["support"])
+        self.assertIsNone(result["pressure"])
+        self.assertEqual(result["price_action"]["regime"], "上行结构")
+        self.assertTrue(result["price_action"]["pivot_points"] is not None)
         fetch.assert_not_called()
 
     def test_explicit_retry_bypasses_only_an_unavailable_cached_result(self):

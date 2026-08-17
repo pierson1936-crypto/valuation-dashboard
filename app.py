@@ -507,8 +507,168 @@ def detect_confirmed_swing_levels(chart, window=80):
     }
 
 
+def summarize_price_action(chart, window=80):
+    """Describe recent price structure without promoting observations to confirmed levels."""
+    dates = list((chart or {}).get("dates") or [])
+    candles = list((chart or {}).get("candle") or [])
+    rows = []
+    for index, candle in enumerate(candles):
+        try:
+            opened, closed, low, high = [float(value) for value in candle[:4]]
+            if min(opened, closed, low, high) <= 0 or high < low:
+                continue
+            rows.append({
+                "date": dates[index] if index < len(dates) else "",
+                "close": closed,
+                "low": low,
+                "high": high,
+            })
+        except (TypeError, ValueError, IndexError):
+            continue
+    if len(rows) < 20:
+        return {
+            "status": "insufficient",
+            "regime": "样本不足",
+            "detail": "有效日 K 少于 20 个交易日，暂不判断价格结构。",
+            "pivot_points": [],
+            "support_zone": None,
+            "pressure_zone": None,
+            "position_pct": None,
+            "position_label": "样本不足",
+            "event": "等待更多日 K 数据",
+        }
+
+    sample = rows[-min(window, len(rows)):]
+    recent = sample[-20:]
+    current = sample[-1]["close"]
+    ma20 = sum(row["close"] for row in recent) / len(recent)
+    older = sample[-40:-20] if len(sample) >= 40 else sample[:20]
+    older_ma = sum(row["close"] for row in older) / len(older)
+    change20 = (current / recent[0]["close"] - 1) * 100
+    ma_slope = (ma20 / older_ma - 1) * 100 if older_ma else 0.0
+    score = (1 if current >= ma20 else -1) + (1 if ma_slope >= 0 else -1) + (
+        1 if change20 >= 0 else -1
+    )
+    if score >= 2:
+        regime = "上行结构"
+        status = "rising"
+    elif score <= -2:
+        regime = "下行结构"
+        status = "falling"
+    else:
+        regime = "震荡过渡"
+        status = "transition"
+
+    recent_low = min(row["low"] for row in recent)
+    recent_high = max(row["high"] for row in recent)
+    position = (
+        (current - recent_low) / (recent_high - recent_low) * 100
+        if recent_high > recent_low else 50.0
+    )
+    if position >= 75:
+        position_label = "接近近20日高位"
+    elif position <= 25:
+        position_label = "接近近20日低位"
+    else:
+        position_label = "位于近20日区间中部"
+
+    median_range = _quantile(
+        [row["high"] - row["low"] for row in sample], 0.50
+    ) or current * 0.01
+    tolerance = max(current * 0.004, median_range * 0.45)
+    pivots = []
+    radius = 2
+    previous = {"high": None, "low": None}
+    for index in range(radius, len(sample) - radius):
+        row = sample[index]
+        neighbours = sample[index - radius:index] + sample[index + 1:index + radius + 1]
+        candidates = []
+        if row["high"] > max(item["high"] for item in neighbours):
+            candidates.append(("high", row["high"]))
+        if row["low"] < min(item["low"] for item in neighbours):
+            candidates.append(("low", row["low"]))
+        for kind, price in candidates:
+            prior = previous[kind]
+            if prior is None:
+                code = "H" if kind == "high" else "L"
+                label = "波段高点" if kind == "high" else "波段低点"
+            elif kind == "high":
+                code = "HH" if price > prior else "LH"
+                label = "高点抬高" if code == "HH" else "高点降低"
+            else:
+                code = "HL" if price > prior else "LL"
+                label = "低点抬高" if code == "HL" else "低点降低"
+            pivots.append({
+                "date": row["date"],
+                "price": round(price, 3),
+                "kind": kind,
+                "code": code,
+                "label": label,
+                "_index": index,
+            })
+            previous[kind] = price
+
+    visible_pivots = pivots[-6:]
+    for item in visible_pivots:
+        item.pop("_index", None)
+
+    def observation_zone(kind):
+        candidates = [
+            item for item in pivots
+            if item["kind"] == kind
+            and ((item["price"] < current) if kind == "low" else (item["price"] > current))
+            and abs(item["price"] / current - 1) <= 0.18
+        ]
+        if candidates:
+            chosen = min(candidates, key=lambda item: abs(item["price"] - current))
+            price = chosen["price"]
+            start_date = chosen["date"]
+            source = chosen["label"]
+        else:
+            price = recent_low if kind == "low" else recent_high
+            start_date = recent[0]["date"]
+            source = "近20日区间下沿" if kind == "low" else "近20日区间上沿"
+        return {
+            "lower": round(max(0.001, price - tolerance), 3),
+            "upper": round(price + tolerance, 3),
+            "mid": round(price, 3),
+            "start_date": start_date,
+            "end_date": sample[-1]["date"],
+            "source": source,
+            "confirmed": False,
+        }
+
+    prior = sample[-21:-1] if len(sample) >= 21 else sample[:-1]
+    prior_high = max(row["high"] for row in prior)
+    prior_low = min(row["low"] for row in prior)
+    if current > prior_high * 1.003:
+        event = "收盘向上越过此前20日高点"
+    elif current < prior_low * 0.997:
+        event = "收盘向下跌破此前20日低点"
+    elif current >= ma20:
+        event = "现价位于20日均价上方，尚未形成新区间突破"
+    else:
+        event = "现价位于20日均价下方，尚未形成新区间跌破"
+
+    return {
+        "status": status,
+        "regime": regime,
+        "detail": "近20日涨跌%s%.1f%%，20日均价趋势%s%.1f%%。" % (
+            "+" if change20 >= 0 else "", change20,
+            "+" if ma_slope >= 0 else "", ma_slope,
+        ),
+        "pivot_points": visible_pivots,
+        "support_zone": observation_zone("low"),
+        "pressure_zone": observation_zone("high"),
+        "position_pct": round(max(0.0, min(100.0, position)), 1),
+        "position_label": position_label,
+        "event": event,
+    }
+
+
 def detect_price_structure(chart):
     """Keep a confirmed box primary, then fall back to repeated swing levels."""
+    price_action = summarize_price_action(chart)
     box = detect_consolidation_box(chart)
     if box:
         common = {
@@ -529,6 +689,7 @@ def detect_price_structure(chart):
                 "price": box["upper"],
                 "touches": box["upper_touches"],
             },
+            "price_action": price_action,
             "structure_note": "支撑与压力采用已确认震荡箱体的上下边界。",
         }
     swings = detect_confirmed_swing_levels(chart)
@@ -537,6 +698,7 @@ def detect_price_structure(chart):
         "box": None,
         "support": swings["support"],
         "pressure": swings["pressure"],
+        "price_action": price_action,
         "structure_note": (
             "未形成严格震荡箱体；支撑与压力仅采用至少两次确认的近期波段高低点。"
             if has_level else
@@ -818,6 +980,7 @@ def build_key_levels(analyzed):
         "box": structure["box"],
         "support": structure["support"],
         "pressure": structure["pressure"],
+        "price_action": structure["price_action"],
         "structure_note": structure["structure_note"],
         "chip": None,
         "chip_status": "not_applicable",
@@ -3851,12 +4014,11 @@ button:hover{background:#1d4ed8} button.g{background:#059669} button.g:hover{bac
 .industry-all-list{padding:4px 0 2px;border-top:1px solid #1c2740}
 #sectorRotation.stale{opacity:.55;filter:grayscale(.45)}
 #sectorRotation.stale::before{content:'数据延迟 · 以下为最近一次结果';display:block;font-size:12px;color:#8ea0bd;margin-bottom:6px;font-weight:400}
-.mkt-flow-wrap{height:300px;position:relative;overflow:hidden;border:1px solid #1c2740;border-radius:12px;
- background:radial-gradient(circle at 50% 50%,#15233a 0,#0b111c 56%,#080d16 100%)}
-#mktFlowSvg{width:100%;height:100%;display:block;shape-rendering:geometricPrecision;text-rendering:geometricPrecision}
-.mkt-flow-meta{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:10px;color:#8ea0bd;font-size:12px}
-.mkt-flow-meta strong{color:#eaf1fb;font-weight:600}
-@media(max-width:560px){.mkt-flow-wrap{height:340px}.mkt-flow-meta{line-height:1.6}.market-movers{grid-template-columns:1fr;gap:0}.mover-panel+.mover-panel{border-left:0;border-top:1px solid #22304a;padding-left:0}.secbar .lab{width:92px}.secbar .pct{width:70px}.secbar .pct small{display:none}}
+.market-quadrant-wrap{height:360px;position:relative;overflow:hidden;border:1px solid #1c2740;border-radius:8px;background:#0b111c}
+#marketQuadrantSvg{width:100%;height:100%;display:block;shape-rendering:geometricPrecision;text-rendering:geometricPrecision}
+.market-quadrant-meta{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:10px;color:#8ea0bd;font-size:12px;line-height:1.6}
+.market-quadrant-meta strong{color:#eaf1fb;font-weight:600}
+@media(max-width:560px){.market-quadrant-wrap{height:390px}.market-quadrant-meta{line-height:1.6}.market-movers{grid-template-columns:1fr;gap:0}.mover-panel+.mover-panel{border-left:0;border-top:1px solid #22304a;padding-left:0}.secbar .lab{width:92px}.secbar .pct{width:70px}.secbar .pct small{display:none}}
 /* 资金流向 / 异动 */
 .alerts{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
 .alert{font-size:13px;font-weight:600;padding:5px 12px;border-radius:8px;display:flex;align-items:center;gap:6px}
@@ -3902,9 +4064,9 @@ button:hover{background:#1d4ed8} button.g{background:#059669} button.g:hover{bac
  <div class="card"><div class="sec-title">大盘指数 <span class="sub" id="mktTime" style="font-weight:400"></span>
    <span onclick="loadMarket(true)" style="float:right;color:#60a5fa;cursor:pointer;font-size:12px">↻ 刷新</span></div>
    <div id="mktIndices" class="grid">加载中…</div></div>
- <div class="card"><div class="sec-title">大盘强弱传导 · 粒子动效 <span class="sub" style="font-weight:400">（基于指数涨跌与行业主力净流入估算，非逐笔成交资金）</span></div>
-   <div class="mkt-flow-wrap"><svg id="mktFlowSvg" role="img" aria-label="大盘强弱板块传导动效"></svg></div>
-   <div class="mkt-flow-meta" id="mktFlowMeta"><span>正在整理市场强弱结构…</span></div></div>
+ <div class="card"><div class="sec-title">行业资金与涨跌四象限 <span class="sub" style="font-weight:400">（横轴：行业涨跌幅 · 纵轴：行业资金净额）</span></div>
+   <div class="market-quadrant-wrap"><svg id="marketQuadrantSvg" role="img" aria-label="行业资金净额与涨跌幅四象限"></svg></div>
+   <div class="market-quadrant-meta" id="marketQuadrantMeta"><span>正在整理行业资金与价格关系…</span></div></div>
  <div class="card"><div class="sec-title">行业涨跌分布 <span class="sub" style="font-weight:400">（按涨幅从高到低）</span></div>
    <div id="sectorRotation"><div class="sub">加载中…</div></div></div>
  <div class="card"><div class="sec-title">AI 大盘独立复盘</div>
@@ -4820,14 +4982,16 @@ function keyLevelBoxStatus(box){
 }
 function renderKeyLevelSummary(data,view){
  const box=g('keyLevelSummary');if(!box)return;
- const range=data.box,support=data.support,pressure=data.pressure,chip=data.chip,items=[];
+ const range=data.box,support=data.support,pressure=data.pressure,chip=data.chip,priceAction=data.price_action||{},items=[];
  if(view==='structure'){
-  if(!range&&!support&&!pressure){box.innerHTML=`<div class="key-level-text">暂无清晰短线结构</div><div class="key-level-note">${escHtml(data.structure_note||data.box_note||'没有清晰结构时不强行画线。')} 结果仅用于图表观察。</div>`;box.className='key-level-summary visible';return;}
+  items.push(['价格结构',priceAction.regime||'等待更多数据']);
+  items.push(['近20日位置',priceAction.position_pct==null?(priceAction.position_label||'—'):`${priceAction.position_label||'区间内'} · ${marketNum(priceAction.position_pct,1)}%`]);
   items.push(['可能支撑',support?marketNum(support.price,3):'暂无确认']);
   items.push(['可能压力',pressure?marketNum(pressure.price,3):'暂无确认']);
-  items.push(['近期震荡箱体',range?`${marketNum(range.lower,3)} ~ ${marketNum(range.upper,3)}`:'未形成']);
-  items.push(['当前所处位置',range?keyLevelBoxStatus(range):'参考近期波段位置']);
-  box.innerHTML=`<div class="key-level-grid">${items.map(([label,value])=>`<div class="key-level-item"><span>${escHtml(label)}</span><strong>${escHtml(value)}</strong></div>`).join('')}</div><div class="key-level-note">${escHtml(data.structure_note||data.box_note||'')} 支撑与压力来自价格结构，不由筹码单独决定。</div>`;
+  items.push(['震荡箱体',range?`${marketNum(range.lower,3)} ~ ${marketNum(range.upper,3)}`:'未形成']);
+  const pivots=Array.isArray(priceAction.pivot_points)?priceAction.pivot_points:[],pivotText=pivots.map(item=>`${item.code} ${marketNum(item.price,3)}`).join(' · ');
+  const detail=[priceAction.detail,priceAction.event,pivotText?`近期波段：${pivotText}`:''].filter(Boolean).map(escHtml).join('<br>');
+  box.innerHTML=`<div class="key-level-grid">${items.map(([label,value])=>`<div class="key-level-item"><span>${escHtml(label)}</span><strong>${escHtml(value)}</strong></div>`).join('')}</div>${detail?`<div class="key-level-text">${detail}</div>`:''}<div class="key-level-note">${escHtml(data.structure_note||data.box_note||'')} 淡色区域是最近波段或20日区间观察区，未达到重复确认条件时不称为支撑压力。</div>`;
  }else if(chip){
   items.push(['主要估算成本密集区',marketNum(chip.peak_price,3)]);
   items.push(['相对现价',chip.peak_position||'—']);
@@ -4843,16 +5007,24 @@ function renderKeyLevelSummary(data,view){
  box.className='key-level-summary visible';
 }
 function keyLevelChartMarks(c,data,view){
- const lines=[],areas=[],range=data&&data.box,support=data&&data.support,pressure=data&&data.pressure,chip=data&&data.chip;
+ const lines=[],areas=[],points=[],range=data&&data.box,support=data&&data.support,pressure=data&&data.pressure,chip=data&&data.chip,priceAction=data&&data.price_action||{};
  if(view==='structure'){
   if(support)lines.push({name:'可能支撑',yAxis:support.price,lineStyle:{color:'#34d399',type:'dashed'},label:{formatter:'可能支撑 {c}',color:'#86efac'}});
   if(pressure)lines.push({name:'可能压力',yAxis:pressure.price,lineStyle:{color:'#f59e0b',type:'dashed'},label:{formatter:'可能压力 {c}',color:'#fcd34d'}});
   if(range)areas.push([{name:'近期震荡区',xAxis:range.start_date,yAxis:range.lower,itemStyle:{color:'rgba(96,165,250,.08)'},label:{show:false}},{xAxis:range.end_date||(c.dates||[]).at(-1),yAxis:range.upper}]);
+  const addZone=(zone,name,color)=>{if(zone)areas.push([{name,xAxis:zone.start_date,yAxis:zone.lower,itemStyle:{color},label:{show:false}},{xAxis:zone.end_date||(c.dates||[]).at(-1),yAxis:zone.upper}]);};
+  if(!range&&!support)addZone(priceAction.support_zone,'承接观察区','rgba(52,211,153,.09)');
+  if(!range&&!pressure)addZone(priceAction.pressure_zone,'压力观察区','rgba(245,158,11,.09)');
+  (Array.isArray(priceAction.pivot_points)?priceAction.pivot_points:[]).forEach(item=>points.push({
+    name:item.label,value:item.price,coord:[item.date,item.price],symbol:'circle',symbolSize:8,
+    itemStyle:{color:item.kind==='high'?'#f59e0b':'#34d399',borderColor:'#0b111c',borderWidth:1},
+    label:{show:true,formatter:item.code,color:item.kind==='high'?'#fcd34d':'#86efac',fontSize:9,position:item.kind==='high'?'top':'bottom'}
+  }));
  }
  if(view==='chip'&&chip){
   lines.push({name:'估算成本密集区',yAxis:chip.peak_price,lineStyle:{color:'#fb7185',width:1.3},label:{formatter:'成本密集区 {c}',color:'#fda4af'}});
  }
- return {lines,areas};
+ return {lines,areas,points};
 }
 function renderChipProfile(){
  if(!securityChart||currentKeyLevelView!=='chip'||!currentKeyLevels||!currentKeyLevels.chip)return;
@@ -4889,7 +5061,7 @@ function drawChart(r){
  const c=r.chart,el=document.getElementById('chart');if(securityChart){securityChart.dispose();securityChart=null;}const ch=echarts.init(el,'dark');securityChart=ch;
  const dailyPct=klinePctSeries(c.candle);
  const volColors=c.vup.map(u=>u?'#f2495c':'#2ec26e');
- const marks=currentKeyLevelView&&currentKeyLevels?keyLevelChartMarks(c,currentKeyLevels,currentKeyLevelView):{lines:[],areas:[]};
+ const marks=currentKeyLevelView&&currentKeyLevels?keyLevelChartMarks(c,currentKeyLevels,currentKeyLevelView):{lines:[],areas:[],points:[]};
  const chartRight=currentKeyLevelView==='chip'&&currentKeyLevels&&currentKeyLevels.chip?112:22;
  const opt={
   backgroundColor:'transparent',
@@ -4918,7 +5090,7 @@ function drawChart(r){
   series:[
    {name:'K线',type:'candlestick',data:c.candle,
      itemStyle:{color:'#f2495c',color0:'#2ec26e',borderColor:'#f2495c',borderColor0:'#2ec26e'},
-     markPoint:{symbol:'pin',symbolSize:0,data:[]},
+     markPoint:{silent:true,data:marks.points},
      markLine:{silent:true,symbol:'none',data:marks.lines,label:{fontSize:10,position:'insideEndTop'}},
      markArea:{silent:true,data:marks.areas}},
    {name:'MA5',type:'line',data:c.ma5,smooth:true,showSymbol:false,lineStyle:{width:1,color:'#e6b422'}},
@@ -4968,65 +5140,56 @@ function showTab(name){
  if(g('openAiKeyBar'))g('openAiKeyBar').style.display=monitorMode?'none':'flex';
  if(workMode){g('chat').style.display='none';g('fab').style.display='none';}
  else if(g('chat').style.display==='none')g('fab').style.display='block';
- if(name==='market'){loadMarket();resumeMarketFlow();}else stopMarketFlow();
+ if(name==='market'){loadMarket();resumeMarketQuadrant();}
  if(name==='watch'){if(g('watchHoldingsPane').style.display!=='none')loadHoldings();else refreshWatchQuotes();}
  if(name==='monitor')loadMonitor(true);
 }
 
-/* ===================== 大盘资金流向粒子动效（GSAP 驱动，缺失时回退 RAF） ===================== */
-let mktFlowRAF=0,mktFlowSource=null,mktFlowResizeTimer=0,mktFlowResizeObserver=null,mktFlowUnavailableMessage='';
-const reduceMktMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+/* ===================== 行业资金净额 × 涨跌幅四象限 ===================== */
+let marketQuadrantSource=null,marketQuadrantResizeTimer=0,marketQuadrantResizeObserver=null,marketQuadrantUnavailableMessage='';
 const SVG_NS='http://www.w3.org/2000/svg';
-function stopMarketFlow(){cancelAnimationFrame(mktFlowRAF);mktFlowRAF=0;}
 function shortLabel(v,n=6){const s=String(v||'');return s.length>n?s.slice(0,n-1)+'…':s;}
-function flowColor(flow){return flow>=0?'#f2495c':'#2ec26e';}
 function fmtYi(v){return v==null?'—':(v>=0?'+':'')+Number(v).toFixed(1)+'亿';}
 function svgEl(tag,attrs={},text=''){const el=document.createElementNS(SVG_NS,tag);Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,String(v)));if(text)el.textContent=text;return el;}
-function flowPoint(a,b,t){const cx=(a.x+b.x)/2,cy=(a.y+b.y)/2-22,u=1-t;return {x:u*u*a.x+2*u*t*cx+t*t*b.x,y:u*u*a.y+2*u*t*cy+t*t*b.y};}
-function flowPath(a,b){return `M ${a.x} ${a.y} Q ${(a.x+b.x)/2} ${(a.y+b.y)/2-22} ${b.x} ${b.y}`;}
-function makeMarketFlowState(indices,sectors){
- const svg=g('mktFlowSvg');if(!svg)return null;const rect=svg.getBoundingClientRect(),w=Math.max(300,Math.round(rect.width||740)),h=Math.max(260,Math.round(rect.height||300));
+function marketQuadrantName(item){if(item.flow>=0&&item.chg>=0)return'资金流入且上涨';if(item.flow>=0)return'资金流入但下跌';if(item.chg>=0)return'上涨但资金流出';return'资金流出且下跌';}
+function marketQuadrantColor(item){if(item.flow>=0&&item.chg>=0)return'#f2495c';if(item.flow>=0)return'#f59e0b';if(item.chg>=0)return'#60a5fa';return'#2ec26e';}
+function makeMarketQuadrantState(sectors){
+ const svg=g('marketQuadrantSvg');if(!svg)return null;const rect=svg.getBoundingClientRect(),w=Math.max(300,Math.round(rect.width||760)),h=Math.max(300,Math.round(rect.height||360));
  svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.replaceChildren();
- const validIndices=(indices||[]).filter(x=>Number.isFinite(Number(x.chg))).map(x=>({...x,chg:Number(x.chg)}));
- // 板块资金驱动力：优先来源明确的 flow_net（亿元），再兼容 main_net，缺失时回退涨跌幅。
- const validSectors=(sectors||[]).map(x=>{
-   const fn=x.flow_net==null?(x.main_net==null?null:Number(x.main_net)):Number(x.flow_net),cg=Number(x.chg);
-   const flow=Number.isFinite(fn)?fn:(Number.isFinite(cg)?cg:null);
-   return {...x,chg:Number.isFinite(cg)?cg:null,flow_net:Number.isFinite(fn)?fn:null,flow};
- }).filter(x=>x.flow!==null);
- const inflow=validSectors.filter(x=>x.flow>=0).sort((a,b)=>b.flow-a.flow).slice(0,3);
- const outflow=validSectors.filter(x=>x.flow<0).sort((a,b)=>a.flow-b.flow).slice(0,3);
- const narrow=w<560,core={x:w/2,y:h/2+18,r:narrow?31:38},makeNodes=(items,side)=>items.map((x,i)=>({...x,side,x:side==='in'?(narrow?68:112):w-(narrow?68:112),y:items.length===1?h/2+22:112+i*((h-154)/(items.length-1)),r:narrow?15:18}));
- const nodes=[...makeNodes(outflow,'in'),...makeNodes(inflow,'out')],particles=[];
- nodes.forEach(node=>{const mag=Math.abs(node.flow),count=Math.min(9,Math.max(4,Math.round(mag*1.2+4)));for(let i=0;i<count;i++)particles.push({from:node.side==='out'?core:node,to:node.side==='out'?node:core,color:flowColor(node.flow),phase:Math.random(),speed:.00012+Math.random()*.0001+Math.min(mag,60)*.000002,size:1.25+Math.random()*1.4});});
- const avg=validIndices.length?validIndices.reduce((sum,x)=>sum+x.chg,0)/validIndices.length:null;
- return {svg,w,h,core,nodes,particles,indices:validIndices.slice(0,narrow?2:4),inflow,outflow,avg,dots:[],aura:null};
+ const rows=(sectors||[]).map(item=>{const flow=Number(item.flow_net==null?item.main_net:item.flow_net),chg=Number(item.chg);return{...item,flow,chg};}).filter(item=>Number.isFinite(item.flow)&&Number.isFinite(item.chg));
+ return {svg,w,h,rows,narrow:w<560};
 }
-function drawIndexRibbon(svg,state){const items=state.indices;if(!items.length)return;const gap=7,w=Math.min(136,(state.w-26-gap*(items.length-1))/items.length),x0=(state.w-(w*items.length+gap*(items.length-1)))/2;items.forEach((item,i)=>{const x=x0+i*(w+gap),col=flowColor(item.chg);svg.append(svgEl('rect',{x,y:14,width:w,height:28,rx:7,fill:'#0f192a',stroke:col,'stroke-opacity':.55}));svg.append(svgEl('text',{x:x+8,y:31,fill:'#c9d4e5','font-size':11,'font-family':'Microsoft YaHei,Segoe UI,sans-serif'},shortLabel(item.name,5)));svg.append(svgEl('text',{x:x+w-8,y:31,fill:col,'font-size':11,'text-anchor':'end','font-family':'Microsoft YaHei,Segoe UI,sans-serif'},(item.chg>=0?'+':'')+item.chg.toFixed(2)+'%'));});}
-function drawMarketNode(svg,node){const col=flowColor(node.flow),label=node.flow_net!=null?fmtYi(node.flow_net):(node.chg!=null?(node.chg>=0?'+':'')+node.chg.toFixed(2)+'%':'—');svg.append(svgEl('circle',{cx:node.x,cy:node.y,r:node.r,fill:'#111c2d',stroke:col,'stroke-width':1.5}));svg.append(svgEl('circle',{cx:node.x,cy:node.y,r:3,fill:col}));svg.append(svgEl('text',{x:node.x,y:node.y+4,fill:'#eaf1fb','font-size':12,'text-anchor':'middle','font-family':'Microsoft YaHei,Segoe UI,sans-serif'},shortLabel(node.name,5)));svg.append(svgEl('text',{x:node.x,y:node.y+node.r+16,fill:col,'font-size':11,'text-anchor':'middle','font-family':'Microsoft YaHei,Segoe UI,sans-serif'},label));}
-function buildMarketFlowSvg(state){
- const {svg,w,h,core,nodes,particles}=state;svg.append(svgEl('title',{},'大盘强弱板块传导动效'));drawIndexRibbon(svg,state);
- svg.append(svgEl('text',{x:18,y:70,fill:'#8ea0bd','font-size':12,'font-family':'Microsoft YaHei,Segoe UI,sans-serif'},'净流出'));
- svg.append(svgEl('text',{x:w-18,y:70,fill:'#8ea0bd','font-size':12,'text-anchor':'end','font-family':'Microsoft YaHei,Segoe UI,sans-serif'},'净流入'));
- nodes.forEach(node=>svg.append(svgEl('path',{d:flowPath(core,node),fill:'none',stroke:flowColor(node.flow),'stroke-opacity':.32,'stroke-width':1.2})));
- const dots=svgEl('g');particles.forEach(p=>{const dot=svgEl('circle',{r:p.size,fill:p.color,'fill-opacity':.95});dots.append(dot);state.dots.push({dot,...p});});svg.append(dots);
- state.aura=svgEl('circle',{cx:core.x,cy:core.y,r:core.r+13,fill:'none',stroke:'#60a5fa','stroke-opacity':.32,'stroke-width':1});svg.append(state.aura);
- svg.append(svgEl('circle',{cx:core.x,cy:core.y,r:core.r,fill:'#172b48',stroke:'#60a5fa','stroke-width':1.5}));
- svg.append(svgEl('text',{x:core.x,y:core.y-7,fill:'#eaf1fb','font-size':13,'text-anchor':'middle','font-family':'Microsoft YaHei,Segoe UI,sans-serif'},'市场动向'));
- svg.append(svgEl('text',{x:core.x,y:core.y+14,fill:state.avg==null?'#8ea0bd':flowColor(state.avg),'font-size':12,'text-anchor':'middle','font-family':'Microsoft YaHei,Segoe UI,sans-serif'},state.avg==null?'指数数据暂缺':(state.avg>=0?'+':'')+state.avg.toFixed(2)+'%'));
- nodes.forEach(node=>drawMarketNode(svg,node));if(!nodes.length)svg.append(svgEl('text',{x:w/2,y:h/2+68,fill:'#8ea0bd','font-size':14,'text-anchor':'middle','font-family':'Microsoft YaHei,Segoe UI,sans-serif'},'暂无可用板块数据'));
+function buildMarketQuadrantSvg(state){
+ const {svg,w,h,rows,narrow}=state;svg.append(svgEl('title',{},'行业资金净额与涨跌幅四象限'));
+ if(!rows.length){svg.append(svgEl('text',{x:w/2,y:h/2-4,fill:'#c9d4e5','font-size':14,'text-anchor':'middle','font-family':'Microsoft YaHei,Segoe UI,sans-serif'},'等待完整行业资金流'));svg.append(svgEl('text',{x:w/2,y:h/2+22,fill:'#7183a0','font-size':11,'text-anchor':'middle','font-family':'Microsoft YaHei,Segoe UI,sans-serif'},'资金源恢复后自动显示四象限'));return;}
+ const margin={left:narrow?46:58,right:narrow?14:24,top:28,bottom:42},pw=w-margin.left-margin.right,ph=h-margin.top-margin.bottom,cx=margin.left+pw/2,cy=margin.top+ph/2;
+ const xMax=Math.max(1,...rows.map(item=>Math.abs(item.chg)))*1.08,flowMax=Math.max(1,...rows.map(item=>Math.abs(item.flow))),yMax=Math.log1p(flowMax);
+ const xPos=value=>margin.left+(value+xMax)/(2*xMax)*pw,yPos=value=>margin.top+(1-(Math.sign(value)*Math.log1p(Math.abs(value))+yMax)/(2*yMax))*ph;
+ [[margin.left,margin.top,pw/2,ph/2,'#f59e0b'],[cx,margin.top,pw/2,ph/2,'#f2495c'],[margin.left,cy,pw/2,ph/2,'#2ec26e'],[cx,cy,pw/2,ph/2,'#60a5fa']].forEach(([x,y,rw,rh,color])=>svg.append(svgEl('rect',{x,y,width:rw,height:rh,fill:color,'fill-opacity':.045})));
+ svg.append(svgEl('line',{x1:cx,y1:margin.top,x2:cx,y2:h-margin.bottom,stroke:'#4b5d78','stroke-width':1}));
+ svg.append(svgEl('line',{x1:margin.left,y1:cy,x2:w-margin.right,y2:cy,stroke:'#4b5d78','stroke-width':1}));
+ const textAttrs={fill:'#7183a0','font-size':narrow?9:10,'font-family':'Microsoft YaHei,Segoe UI,sans-serif'};
+ svg.append(svgEl('text',{x:margin.left+8,y:margin.top+15,...textAttrs},'资金流入 · 价格下跌'));
+ svg.append(svgEl('text',{x:w-margin.right-8,y:margin.top+15,'text-anchor':'end',...textAttrs},'资金流入 · 价格上涨'));
+ svg.append(svgEl('text',{x:margin.left+8,y:h-margin.bottom-8,...textAttrs},'资金流出 · 价格下跌'));
+ svg.append(svgEl('text',{x:w-margin.right-8,y:h-margin.bottom-8,'text-anchor':'end',...textAttrs},'资金流出 · 价格上涨'));
+ svg.append(svgEl('text',{x:margin.left-8,y:margin.top+4,'text-anchor':'end',...textAttrs},fmtYi(flowMax)));
+ svg.append(svgEl('text',{x:margin.left-8,y:cy+4,'text-anchor':'end',...textAttrs},'0'));
+ svg.append(svgEl('text',{x:margin.left-8,y:h-margin.bottom+4,'text-anchor':'end',...textAttrs},fmtYi(-flowMax)));
+ svg.append(svgEl('text',{x:margin.left,y:h-14,...textAttrs},`${-xMax.toFixed(1)}%`));
+ svg.append(svgEl('text',{x:cx,y:h-14,'text-anchor':'middle',...textAttrs},'涨跌幅 0%'));
+ svg.append(svgEl('text',{x:w-margin.right,y:h-14,'text-anchor':'end',...textAttrs},`+${xMax.toFixed(1)}%`));
+ const labelCount=narrow?4:8,labelSet=new Set([...rows].sort((a,b)=>(Math.log1p(Math.abs(b.flow))/yMax+Math.abs(b.chg)/xMax)-(Math.log1p(Math.abs(a.flow))/yMax+Math.abs(a.chg)/xMax)).slice(0,labelCount).map(item=>item.name));
+ [...rows].sort((a,b)=>Math.abs(a.flow)-Math.abs(b.flow)).forEach(item=>{const x=xPos(item.chg),y=yPos(item.flow),color=marketQuadrantColor(item),radius=4+Math.min(5,Math.sqrt(Math.abs(item.flow)+1)*.55),dot=svgEl('circle',{cx:x,cy:y,r:radius,fill:color,'fill-opacity':.8,stroke:'#dce7f7','stroke-opacity':.45,'stroke-width':.8,tabindex:0,'aria-label':`${item.name}，涨跌幅${item.chg>=0?'+':''}${item.chg.toFixed(2)}%，资金净额${fmtYi(item.flow)}`});dot.append(svgEl('title',{},`${item.name}\n涨跌幅 ${item.chg>=0?'+':''}${item.chg.toFixed(2)}%\n资金净额 ${fmtYi(item.flow)}\n${marketQuadrantName(item)}`));svg.append(dot);if(labelSet.has(item.name)){const right=x<cx;svg.append(svgEl('text',{x:x+(right?radius+4:-radius-4),y:y-3,'text-anchor':right?'start':'end',fill:'#c9d4e5','font-size':narrow?9:10,'font-family':'Microsoft YaHei,Segoe UI,sans-serif'},shortLabel(item.name,narrow?5:7)));}});
 }
-function marketFlowTick(state,timeSec){const time=timeSec*1000;state.dots.forEach(p=>{let t=(p.phase+time*p.speed)%1;if(t<0)t+=1;const pt=flowPoint(p.from,p.to,t);p.dot.setAttribute('cx',pt.x);p.dot.setAttribute('cy',pt.y+Math.sin(time/520+p.phase*6)*1.5);});if(state.aura)state.aura.setAttribute('r',state.core.r+13+(reduceMktMotion?0:Math.sin(time/900)*2));}
-function startMarketFlow(state){stopMarketFlow();if(reduceMktMotion){marketFlowTick(state,0);return;}const loop=(t)=>{if(document.visibilityState==='visible')marketFlowTick(state,t/1000);mktFlowRAF=requestAnimationFrame(loop);};mktFlowRAF=requestAnimationFrame(loop);}
-function updateMarketFlowMeta(state){const meta=g('mktFlowMeta');if(!meta)return;if(mktFlowUnavailableMessage){meta.textContent=mktFlowUnavailableMessage;return;}const avg=state.avg==null?'—':(state.avg>=0?'+':'')+state.avg.toFixed(2)+'%',inN=state.inflow.map(x=>x.name).join('、')||'暂无',outN=state.outflow.map(x=>x.name).join('、')||'暂无';meta.textContent=`指数平均 ${avg} · 净流入：${inN} · 净流出：${outN}`;}
-function watchMarketFlowSize(svg){if(mktFlowResizeObserver||!window.ResizeObserver)return;mktFlowResizeObserver=new ResizeObserver(()=>{clearTimeout(mktFlowResizeTimer);mktFlowResizeTimer=setTimeout(()=>{if(mktFlowSource&&g('tab-market').style.display!=='none')drawMarketFlow(mktFlowSource.indices,mktFlowSource.sectors);},100);});mktFlowResizeObserver.observe(svg.parentElement);}
-function drawMarketFlow(indices,sectors){mktFlowSource={indices:indices||[],sectors:sectors||[]};const state=makeMarketFlowState(mktFlowSource.indices,mktFlowSource.sectors);if(!state)return;buildMarketFlowSvg(state);updateMarketFlowMeta(state);watchMarketFlowSize(state.svg);startMarketFlow(state);}
-function resumeMarketFlow(){if(mktFlowSource&&g('tab-market').style.display!=='none')drawMarketFlow(mktFlowSource.indices,mktFlowSource.sectors);}
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')stopMarketFlow();else resumeMarketFlow();});
+function updateMarketQuadrantMeta(state){const meta=g('marketQuadrantMeta');if(!meta)return;if(marketQuadrantUnavailableMessage){meta.textContent=marketQuadrantUnavailableMessage;return;}const counts={'资金流入且上涨':0,'资金流入但下跌':0,'上涨但资金流出':0,'资金流出且下跌':0};state.rows.forEach(item=>counts[marketQuadrantName(item)]++);meta.innerHTML=`<span><strong>${state.rows.length}</strong> 个行业 · 流入且上涨 <strong>${counts['资金流入且上涨']}</strong> · 流入但下跌 <strong>${counts['资金流入但下跌']}</strong> · 上涨但流出 <strong>${counts['上涨但资金流出']}</strong> · 流出且下跌 <strong>${counts['资金流出且下跌']}</strong></span><span>资金轴采用对称对数缩放 · 悬停查看实际值</span>`;}
+function watchMarketQuadrantSize(svg){if(marketQuadrantResizeObserver||!window.ResizeObserver)return;marketQuadrantResizeObserver=new ResizeObserver(()=>{clearTimeout(marketQuadrantResizeTimer);marketQuadrantResizeTimer=setTimeout(()=>{if(marketQuadrantSource&&g('tab-market').style.display!=='none')drawMarketQuadrant(marketQuadrantSource);},100);});marketQuadrantResizeObserver.observe(svg.parentElement);}
+function drawMarketQuadrant(sectors){marketQuadrantSource=sectors||[];const state=makeMarketQuadrantState(marketQuadrantSource);if(!state)return;buildMarketQuadrantSvg(state);updateMarketQuadrantMeta(state);watchMarketQuadrantSize(state.svg);}
+function resumeMarketQuadrant(){if(marketQuadrantSource&&g('tab-market').style.display!=='none')drawMarketQuadrant(marketQuadrantSource);}
 /* ===================== 大盘 + 板块轮动 ===================== */
 let mktLoaded=false,mktLoading=false,mktRefreshTimer=0;
 async function loadMarket(force=false,poll=false){
- if(mktLoaded&&!force&&!poll){resumeMarketFlow();return;}
+ if(mktLoaded&&!force&&!poll){resumeMarketQuadrant();return;}
  if(mktLoading)return;
  mktLoading=true;
  let d=null;
@@ -5061,10 +5224,9 @@ async function loadMarket(force=false,poll=false){
   const fills=document.querySelectorAll('#sectorRotation .fill');
   if(hasGsap()){gsap.fromTo(fills,{width:0},{width:(i,el)=>el.dataset.w+'%',duration:.7,ease:'power3.out',stagger:.05});}
   else{setTimeout(()=>fills.forEach(f=>{f.style.width=f.dataset.w+'%';}),60);}
-  // 触发资金流向粒子动效
-  mktFlowUnavailableMessage=d.flow_complete?'':(d.refreshing?'正在后台更新行业资金流；当前没有可用的完整快照。':'行业资金流排行暂不可用：最近快照未同时覆盖净流入与净流出。');
-  drawMarketFlow(d.indices||[], d.flow_complete?(d.sectors||[]):[]);
- }catch(e){g('sectorRotation').innerHTML='<div class="sub">大盘数据加载失败：'+e+'</div>';g('mktFlowMeta').textContent='大盘数据暂不可用，请稍后刷新。';}
+  marketQuadrantUnavailableMessage=d.flow_complete?'':(d.refreshing?'正在后台更新行业资金流；当前没有可用的完整快照。':'行业资金流排行暂不可用：最近快照未同时覆盖净流入与净流出。');
+  drawMarketQuadrant(d.flow_complete?(d.sectors||[]):[]);
+ }catch(e){g('sectorRotation').innerHTML='<div class="sub">大盘数据加载失败：'+e+'</div>';g('marketQuadrantMeta').textContent='大盘数据暂不可用，请稍后刷新。';}
  finally{mktLoading=false;clearTimeout(mktRefreshTimer);if(d&&d.refreshing)mktRefreshTimer=setTimeout(()=>loadMarket(false,true),2000);}
 }
 
