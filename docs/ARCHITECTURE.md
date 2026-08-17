@@ -18,6 +18,8 @@ flowchart LR
     S --> D["数据访问函数"]
     S --> Q["分位与技术指标函数"]
     D --> EM["东方财富"]
+    D --> THS["同花顺<br/>行业资金主源"]
+    THS -. "行业资金失败回退" .-> EM
     D --> T["腾讯证券"]
     D -. "K线兜底" .-> SI["新浪财经"]
     D -. "筹码日线兜底" .-> BS["Baostock"]
@@ -41,13 +43,13 @@ flowchart LR
 | --- | --- | --- |
 | 网络基础 | `http_text`、`fetch_json`、`api_post` | 外部 GET/POST、重试、解码 |
 | 标的识别 | `resolve`、`_guess` | 代码解析、市场/类型/名称兜底 |
-| 数据访问 | `fetch_kline`、`fetch_eastmoney_chip_kline`、`fetch_valuation`、`fetch_industry`、`fetch_fundamentals`、`fetch_company_context`、`fetch_etf_context`、`fetch_moneyflow` | 读取公开接口并转换字段 |
+| 数据访问 | `fetch_kline`、`fetch_eastmoney_chip_kline`、`fetch_valuation`、`fetch_industry`、`fetch_fundamentals`、`fetch_company_context`、`fetch_etf_context`、`fetch_moneyflow`、`fetch_industry_boards_ths`、`fetch_industry_boards_eastmoney`、`fetch_industry_boards_realtime` | 读取公开接口并转换字段；行业资金流优先同花顺完整榜，失败时读取东方财富净流入/净流出两端 |
 | 计算 | `sma`、`ema`、`rsi`、`macd`、`boll`、`percentile_rank`、`detect_consolidation_box`、`estimate_chip_distribution` 等 | 纯计算或近似纯计算 |
 | 业务编排 | `analyze`、`build_report`、`build_alerts`、`build_key_levels` | 并行取数、组装稳定响应和独立关键位结果 |
-| 缓存 | `analyze_cached`、`key_levels_cached`、`market_overview`、`market_history`、`_ETF_CONTEXT` | 180 秒分析缓存、关键位成功 6 小时/失败 5 分钟缓存、120 秒市场缓存、15 分钟多日市场缓存、ETF 披露成功 24 小时/失败 10 分钟缓存 |
+| 缓存 | `analyze_cached`、`key_levels_cached`、`market_overview`、`industry_overview`、`market_history`、`_ETF_CONTEXT` | 180 秒分析缓存、关键位成功 6 小时/失败 5 分钟缓存、120 秒市场缓存、300 秒行业资金流缓存、15 分钟多日市场缓存、ETF 披露成功 24 小时/失败 10 分钟缓存 |
 | AI | `agent_run`、`generate_security_ai_report`、`generate_market_ai_report`、`panel_analyze`；`analyze_multidim` 仅兼容 | 单标的/大盘编号事实约束、工具调用与模型文字编排；旧多维页面入口已下线 |
 | 导出 | `build_excel` | 调用分析并生成内存中的 XLSX |
-| Web | `Handler`、`HTML` | 路由、JSON/文件响应、页面交互 |
+| Web | `Handler`、`HTML`、`LocalThreadingHTTPServer` | 路由、JSON/文件响应、页面交互；本地端口独占，避免多个服务混合响应 |
 | 盯盘仓储 | `MonitorRepository` | 自选、规则、分钟/每日快照、事件和草案缓存 |
 | 三线预设 | `build_simple_rules`、`simple_rule_summary` | 将三个用户价格转换为确定性规则并提供简洁总览 |
 | 规则引擎 | `RuleEngine` | 连续确认、冷却、回差、上穿/下穿与重新武装 |
@@ -169,8 +171,9 @@ Web 分析本身的进程内状态：
 - `_KEY_LEVEL_CACHE`：按代码缓存独立关键位结果，成功 6 小时、失败或错位 5 分钟；
 - `_INDEX_REFERENCE_CACHE`：缓存 ETF 跟踪指数名称匹配，成功 24 小时，失败短缓存；
 - `_MKT`：缓存市场概览，TTL 120 秒；
-- `_INDUSTRY`：缓存行业板块主力净流入，TTL 120 秒；东财失败时读取
-  `data/industry_flow_snapshot.json` 并标记 `stale=true`，该文件是运行时缓存，不提交；
+- `_INDUSTRY`：缓存行业板块主力净流入，TTL 300 秒。页面请求先返回内存或
+  `data/industry_flow_snapshot.json`，再由单一后台线程更新；失败时保留最近一份完整快照并标记
+  `stale=true`。只有同时包含净流入和净流出的结果才会覆盖快照；该文件不提交；
 - `_MKT_HISTORY`：按需缓存全部指数与板块 ETF 多日日线，TTL 15 分钟；只在组合分析时
   加载，不进入启动预热；
 - 浏览器 `localStorage`：自选代码/名称/分组、当天分组轨迹、页面输入的模型 Key 和
@@ -242,7 +245,7 @@ ETF 上下文先对基金类别读取公开资料；只要存在最近报告期�
 | `GET /api/analyze` | 单标的完整分析；股票附日内概况与公司定位，ETF 附后台 `etf_context` 披露信息 | 行情/估值/F10 等公开接口 |
 | `GET /api/intraday` | 标的与参考指数的当日分时、相对强弱摘要和代表时点；失败不影响主分析 | 腾讯分钟行情、ETF 跟踪指数名称匹配 |
 | `GET /api/key-levels` | 点击后识别近期震荡区间；普通股票另返回本地筹码估算，失败不影响主分析 | 现有前复权 K；股票筹码优先东方财富，失败时 Baostock 前复权日 K 与换手率 |
-| `GET /api/market` | 指数与行业板块主力净流入；东财失败时读取快照或回退旧板块 ETF 行情 | 腾讯指数报价、东方财富行业板块资金流 |
+| `GET /api/market` | 指数与行业资金流；快照优先、后台更新，`force=1` 发起强制更新，页面用 `poll=1` 轮询本地状态；`flow_source/flow_label/flow_kind` 明确来源口径 | 腾讯指数报价、同花顺行业资金净额，东方财富行业主力净流入回退 |
 | `GET /api/name` | 自选名称补全 | 腾讯/东方财富 |
 | `GET /api/watch_quotes` | 最多 30 个自选报价 | 腾讯/东方财富 |
 | `GET /api/excel` | Excel 导出 | 数据接口、openpyxl |

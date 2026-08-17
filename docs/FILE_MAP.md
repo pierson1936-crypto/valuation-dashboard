@@ -19,15 +19,16 @@
 | `monitoring/portfolio_analysis.py` | 共同截止日、趋势/相对强弱、贡献、集中度、相关性、强弱分类和历史诊断重放 | `monitoring/portfolio.py` | 是 | 高 | 诊断重放不是收益回测；质量不足必须显式降级 |
 | `monitoring/portfolio.py` | 组合快照、事实证据目录、0 Token 扫描、两阶段 DeepSeek/GPT 报告、用量、缓存和最近 7 次历史 | Web 持仓页 | 是 | 高 | 第一轮不得接收用户判断；已确认事实只能引用有效 evidence_id |
 | `monitoring/trading_calendar.py` | 本地交易日历读取和交易日判断 | `MonitorService`、Web 状态 | 是 | 中 | 无权威文件时明确使用工作日兜底 |
-| `启动.bat` | 检查 Python、Excel 导出与筹码备用源依赖并启动 `app.py` | 用户双击 | 否 | 中 | 兼容入口，不轻易改名 |
+| `启动.bat` | 检查 Python、Excel 导出、筹码备用源与行业资金签名依赖并启动 `app.py` | 用户双击 | 否 | 中 | 固定优先使用 Edge；兼容入口不改名 |
 | `启动AI助手.bat` | 临时读取 DeepSeek Key 并启动 CLI | 用户双击 | 否 | 中 | 不把输入写入文件 |
 | `启动盯盘.bat` | 持续运行本地盯盘 CLI | 用户双击 | 是 | 中 | 窗口关闭即停止 |
-| `requirements.txt` | Excel 导出和筹码免费备用数据源依赖 | 开发者/pip | 否 | 低 | 核心 Web 其余部分为标准库 |
+| `requirements.txt` | Excel 导出、筹码备用源和同花顺请求签名运行时依赖 | 开发者/pip | 否 | 低 | `mini-racer` 只执行固定第三方签名脚本 |
+| `vendor/` | 固定版本的 AkShare 同花顺签名脚本、来源哈希与 MIT 许可 | `app.py` 行业资金流 | 否 | 中 | 不执行远程脚本；升级前重做真实接口测试 |
 | `data/industry_boards.json` | 行业板块重点排序预留配置 | 当前未参与运行时排序 | 否 | 低 | 东财动态全量结果不筛选；不是运行时快照 |
 | `tests/fixtures.py` | 固定 K 线、估值和标的元数据 | `test_analysis.py` | 否 | 低 | 不请求真实接口 |
-| `tests/test_analysis.py` | 分位口径、完整分析、当日分时、震荡区间和筹码估算契约 | unittest | 是 | 低 | 固定数据，不请求真实接口 |
+| `tests/test_analysis.py` | 分位口径、完整分析、当日分时、关键位/筹码和 AI 资金流证据契约 | unittest | 是 | 低 | 固定数据，不请求真实接口 |
 | `tests/test_http.py` | 随机端口 HTTP/API、按需关键位和内嵌网页契约测试 | unittest | 是 | 低 | Mock 业务与模型调用 |
-| `tests/test_industry_flow.py` | 行业资金流解析、缓存快照降级与市场概览兼容契约 | unittest | 否 | 低 | 使用临时快照和 Mock，不联网 |
+| `tests/test_industry_flow.py` | 行业资金流解析、快照优先/后台刷新与市场概览兼容契约 | unittest | 否 | 低 | 使用临时快照和 Mock，不联网 |
 | `tests/test_monitoring_presets.py` | 三线构建、更新隔离和 CLI 总览 | unittest | 是 | 低 | 使用临时数据库 |
 | `tests/test_monitoring_web.py` | Web 后台启停和凭据脱敏 | unittest | 是 | 低 | 不请求真实行情 |
 | `tests/test_monitoring_explanations.py` | 事件复核缓存、严格 JSON 和用量回滚 | unittest | 是 | 低 | 使用假模型 |
@@ -50,11 +51,11 @@
 | 区域 | 函数/对象 |
 | --- | --- |
 | 外部请求 | `http_text`、`fetch_json`、`api_post` |
-| 标的/行情 | `_guess`、`resolve`、`_parse_qt`、`fetch_kline`、`fetch_quote`、`fetch_intraday`、`build_intraday_comparison`、`resolve_index_reference`、`fetch_eastmoney_chip_kline`、`market_overview`、`market_history` |
+| 标的/行情 | `_guess`、`resolve`、`_parse_qt`、`fetch_kline`、`fetch_quote`、`fetch_intraday`、`build_intraday_comparison`、`resolve_index_reference`、`fetch_eastmoney_chip_kline`、`fetch_industry_boards_ths`、`fetch_industry_boards_eastmoney`、`fetch_industry_boards_realtime`、`industry_overview`、`market_overview`、`market_history` |
 | 估值/财务/概念/ETF 披露/资金 | `fetch_valuation`、`fetch_industry`、`fetch_fundamentals`、`fetch_company_context`、`fetch_etf_context`、`fetch_moneyflow` |
 | 纯计算 | `sma`、`ema`、`rsi`、`macd`、`boll`、`percentile_rank`、`stat_block`、`detect_consolidation_box`、`estimate_chip_distribution` |
 | 综合分析 | `analyze`、`build_report`、`build_alerts`、`analyze_cached`、`build_key_levels`、`key_levels_cached` |
 | Excel | `build_excel` |
 | AI | `AGENT_TOOLS`、`agent_run`、`build_security_ai_evidence`、`generate_security_ai_report`、`generate_market_ai_report`、`panel_analyze`；`analyze_multidim` 仅旧后端兼容 |
 | 前端 | `HTML`；今日分时/相对强弱、按需关键位/筹码、公司定位与 ETF 定位/指数追踪渲染 |
-| HTTP/启动 | `Handler`（含 `GET /api/intraday`、`GET /api/key-levels` 和按需 `POST /api/security_report`）、`if __name__ == "__main__"` |
+| HTTP/启动 | `Handler`（含 `GET /api/intraday`、`GET /api/key-levels` 和按需 `POST /api/security_report`）、`LocalThreadingHTTPServer`、`if __name__ == "__main__"` |

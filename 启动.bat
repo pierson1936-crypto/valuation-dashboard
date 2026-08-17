@@ -29,15 +29,16 @@ echo 使用的 Python 命令: %PYCMD%
 %PYCMD% --version
 echo.
 
-rem 确认可选组件（Excel 导出、筹码备用数据源），没有就装
-%PYCMD% -c "import openpyxl, baostock" 1>nul 2>nul
+rem 确认可选组件（Excel 导出、筹码备用源、行业资金流签名），没有就装
+%PYCMD% -c "import openpyxl, baostock, py_mini_racer" 1>nul 2>nul
 if errorlevel 1 (
     echo 首次运行，正在安装项目组件，请稍候...
     %PYCMD% -m pip install -r requirements.txt
     echo.
 )
 
-echo 正在启动服务，浏览器会自动打开 http://localhost:8688
+set "APP_BROWSER=edge"
+echo 正在启动服务，Edge 会自动打开 http://localhost:8688
 echo 用完后直接关闭本窗口即可。
 echo --------------------------------------------
 %PYCMD% app.py

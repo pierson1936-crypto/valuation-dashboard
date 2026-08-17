@@ -496,6 +496,7 @@ class IndependentSecurityReportTests(unittest.TestCase):
     def test_security_evidence_keeps_industry_flow_semantics(self):
         market = self.fixed_market()
         market["stale"] = True
+        market["flow_complete"] = True
         market["sectors"] = [{
             "code": "BK0436", "name": "计算机", "chg": 2.5, "main_net": 8.9,
         }]
@@ -505,6 +506,37 @@ class IndependentSecurityReportTests(unittest.TestCase):
 
         self.assertEqual(flow["data"]["items"][0]["main_net_inflow_yi"], 8.9)
         self.assertTrue(flow["data"]["stale"])
+
+    def test_security_evidence_labels_ths_net_without_calling_it_main_net(self):
+        market = self.fixed_market()
+        market["flow_complete"] = True
+        market["flow_source"] = "ths"
+        market["sectors"] = [{
+            "code": "THS:半导体", "name": "半导体", "chg": 3.0,
+            "flow_net": 8.9, "main_net": None,
+        }]
+
+        evidence = app.build_security_ai_evidence(self.fixed_result(), market)
+        flow = next(item for item in evidence if item["topic"] == "行业板块资金流快照")
+
+        self.assertEqual(flow["data"]["items"][0]["net_amount_yi"], 8.9)
+        self.assertNotIn("main_net_inflow_yi", flow["data"]["items"][0])
+        self.assertIn("同花顺", flow["data"]["meaning"])
+
+    def test_incomplete_industry_snapshot_is_not_fund_flow_evidence(self):
+        market = self.fixed_market()
+        market["source"] = "industry_flow"
+        market["flow_complete"] = False
+        market["sectors"] = [{
+            "code": "BK0436", "name": "计算机", "chg": 2.5, "main_net": 8.9,
+        }]
+
+        evidence = app.build_security_ai_evidence(self.fixed_result(), market)
+        serialized = json.dumps(evidence, ensure_ascii=False)
+
+        self.assertNotIn("行业板块资金流快照", [item["topic"] for item in evidence])
+        self.assertIn("行业板块涨跌快照", [item["topic"] for item in evidence])
+        self.assertNotIn("main_net_inflow_yi", serialized)
 
     def test_chip_evidence_only_contains_allowed_estimate_fields(self):
         key_levels = {

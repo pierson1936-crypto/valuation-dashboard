@@ -145,8 +145,10 @@ class HttpSmokeTests(unittest.TestCase):
         self.assertIn("keyLevelRequest&&keyLevelRequest.code===code", html)
         self.assertIn("近120日估算筹码", html)
         self.assertIn("['原始数据',chip.source_label||'—']", html)
-        self.assertIn("行业资金流 · 今日资金往哪流", html)
-        self.assertIn("按主力净流入排序", html)
+        self.assertIn("行业涨跌分布", html)
+        self.assertIn("按涨幅从高到低", html)
+        self.assertIn("market-breadth", html)
+        self.assertIn("全部行业", html)
         self.assertIn("行业主力净流入估算", html)
         self.assertNotIn("70%估算成本区", html)
         self.assertNotIn("估算获利占比", html)
@@ -193,6 +195,31 @@ class HttpSmokeTests(unittest.TestCase):
         self.assertNotIn("tesseract.min.js", html)
         self.assertNotIn("parseHoldingOcrData", html)
         self.assertNotIn('id="mktFlowCanvas"', html)
+
+    def test_market_force_and_poll_query_are_forwarded(self):
+        payload = {
+            "indices": [], "sectors": [], "stale": True,
+            "flow_complete": False, "refreshing": False,
+        }
+        with patch.object(app, "market_overview", return_value=payload) as overview:
+            status, data = self.get_json("/api/market?force=1")
+        self.assertEqual(status, 200)
+        self.assertFalse(data["flow_complete"])
+        overview.assert_called_once_with(force=True, poll=False)
+
+        with patch.object(app, "market_overview", return_value=payload) as overview:
+            status, _ = self.get_json("/api/market?poll=1")
+        self.assertEqual(status, 200)
+        overview.assert_called_once_with(force=False, poll=True)
+
+    def test_project_server_uses_an_exclusive_local_port(self):
+        first = app.LocalThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        try:
+            with self.assertRaises(OSError):
+                second = app.LocalThreadingHTTPServer(first.server_address, app.Handler)
+                second.server_close()
+        finally:
+            first.server_close()
 
     def test_embedded_frontend_uses_portfolio_volatility_coverage_contract(self):
         self.assertIn("concentration.volatility_coverage_pct", app.HTML)
