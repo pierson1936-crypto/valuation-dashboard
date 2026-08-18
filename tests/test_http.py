@@ -85,6 +85,7 @@ class HttpSmokeTests(unittest.TestCase):
         self.assertIn("if(name==='market')loadMarket(true)", html)
         self.assertIn("正在刷新最新行情与行业资金流", html)
         self.assertIn("const duration=1300", html)
+        self.assertIn("const duration=1300,delay=80,start=performance.now()", html)
         self.assertIn("mktForceQueued", html)
         self.assertIn("正在排队刷新最新行情与行业资金流", html)
         self.assertNotIn("大盘强弱传导 · 粒子动效", html)
