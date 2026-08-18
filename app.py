@@ -5150,7 +5150,7 @@ function showTab(name){
  if(g('openAiKeyBar'))g('openAiKeyBar').style.display=monitorMode?'none':'flex';
  if(workMode){g('chat').style.display='none';g('fab').style.display='none';}
  else if(g('chat').style.display==='none')g('fab').style.display='block';
- if(name==='market')loadMarket(true);
+ if(name==='market'){resumeMarketFlowOverview();loadMarket(true);}
  if(name==='watch'){if(g('watchHoldingsPane').style.display!=='none')loadHoldings();else refreshWatchQuotes();}
  if(name==='monitor')loadMonitor(true);
 }

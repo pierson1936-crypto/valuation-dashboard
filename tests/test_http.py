@@ -82,7 +82,7 @@ class HttpSmokeTests(unittest.TestCase):
         self.assertIn("replayMarketFlowOverview", html)
         self.assertIn("data-flow-bar", html)
         self.assertIn("data-flow-donut", html)
-        self.assertIn("if(name==='market')loadMarket(true)", html)
+        self.assertIn("if(name==='market'){resumeMarketFlowOverview();loadMarket(true);}", html)
         self.assertIn("正在刷新最新行情与行业资金流", html)
         self.assertIn("const duration=1300", html)
         self.assertIn("const duration=1300,delay=80,start=performance.now()", html)
