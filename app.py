@@ -5150,7 +5150,7 @@ function showTab(name){
  if(g('openAiKeyBar'))g('openAiKeyBar').style.display=monitorMode?'none':'flex';
  if(workMode){g('chat').style.display='none';g('fab').style.display='none';}
  else if(g('chat').style.display==='none')g('fab').style.display='block';
- if(name==='market')loadMarket();
+ if(name==='market')loadMarket(true);
  if(name==='watch'){if(g('watchHoldingsPane').style.display!=='none')loadHoldings();else refreshWatchQuotes();}
  if(name==='monitor')loadMonitor(true);
 }
@@ -5198,7 +5198,7 @@ function buildMarketFlowOverviewSvg(state){
 }
 function updateMarketFlowOverviewMeta(state){const meta=g('marketFlowOverviewMeta');if(!meta)return;if(marketFlowOverviewUnavailableMessage){meta.textContent=marketFlowOverviewUnavailableMessage;return;}const inflowCount=state.rows.filter(item=>item.flow>0).length,outflowCount=state.rows.filter(item=>item.flow<0).length;meta.innerHTML=`<span>净流入 <strong>${inflowCount}</strong> 个 · 净流出 <strong>${outflowCount}</strong> 个</span><span>柱长采用对数缩放 · 数字为实际亿元</span>`;}
 function watchMarketFlowOverviewSize(svg){if(marketFlowOverviewResizeObserver||!window.ResizeObserver)return;marketFlowOverviewResizeObserver=new ResizeObserver(()=>{clearTimeout(marketFlowOverviewResizeTimer);marketFlowOverviewResizeTimer=setTimeout(()=>{if(marketFlowOverviewSource&&g('tab-market').style.display!=='none')drawMarketFlowOverview(marketFlowOverviewSource);},100);});marketFlowOverviewResizeObserver.observe(svg.parentElement);}
-function replayMarketFlowOverview(svg){if(marketFlowOverviewAnimation)cancelAnimationFrame(marketFlowOverviewAnimation);if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;const bars=[...svg.querySelectorAll('[data-flow-bar]')],donut=svg.querySelector('[data-flow-donut]');if(!bars.length&&!donut)return;const duration=620,start=performance.now(),ease=t=>1-Math.pow(1-t,3),render=progress=>{bars.forEach(bar=>{const from=Number(bar.dataset.flowStartX),to=Number(bar.dataset.flowX),width=Number(bar.dataset.flowWidth);bar.setAttribute('x',from+(to-from)*progress);bar.setAttribute('width',width*progress);});if(donut){const cx=Number(donut.dataset.flowCx),cy=Number(donut.dataset.flowCy),scale=.82+.18*progress;donut.setAttribute('opacity',.35+.65*progress);donut.setAttribute('transform',`translate(${cx} ${cy}) scale(${scale}) translate(${-cx} ${-cy})`);}};const frame=now=>{const progress=Math.min(1,ease((now-start)/duration));render(progress);if(progress<1)marketFlowOverviewAnimation=requestAnimationFrame(frame);else marketFlowOverviewAnimation=0;};render(0);marketFlowOverviewAnimation=requestAnimationFrame(frame);}
+function replayMarketFlowOverview(svg){if(marketFlowOverviewAnimation)cancelAnimationFrame(marketFlowOverviewAnimation);if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;const bars=[...svg.querySelectorAll('[data-flow-bar]')],donut=svg.querySelector('[data-flow-donut]');if(!bars.length&&!donut)return;const duration=920,start=performance.now(),ease=t=>1-Math.pow(1-t,3),stage=(t,delay,span)=>Math.max(0,Math.min(1,(t-delay)/span)),render=progress=>{bars.forEach((bar,index)=>{const barProgress=ease(stage(progress,index*.022,.64)),from=Number(bar.dataset.flowStartX),to=Number(bar.dataset.flowX),width=Number(bar.dataset.flowWidth);bar.setAttribute('x',from+(to-from)*barProgress);bar.setAttribute('width',width*barProgress);});if(donut){const donutProgress=ease(stage(progress,.12,.72)),cx=Number(donut.dataset.flowCx),cy=Number(donut.dataset.flowCy),scale=.82+.18*donutProgress;donut.setAttribute('opacity',.35+.65*donutProgress);donut.setAttribute('transform',`translate(${cx} ${cy}) scale(${scale}) translate(${-cx} ${-cy})`);}};const frame=now=>{const progress=Math.min(1,(now-start)/duration);render(progress);if(progress<1)marketFlowOverviewAnimation=requestAnimationFrame(frame);else marketFlowOverviewAnimation=0;};render(0);marketFlowOverviewAnimation=requestAnimationFrame(frame);}
 function drawMarketFlowOverview(sectors,animate=false){marketFlowOverviewSource=sectors||[];const state=makeMarketFlowOverviewState(marketFlowOverviewSource);if(!state)return;buildMarketFlowOverviewSvg(state);updateMarketFlowOverviewMeta(state);watchMarketFlowOverviewSize(state.svg);if(animate)replayMarketFlowOverview(state.svg);}
 function resumeMarketFlowOverview(){if(marketFlowOverviewSource&&g('tab-market').style.display!=='none')drawMarketFlowOverview(marketFlowOverviewSource,true);}
 /* ===================== 大盘 + 板块轮动 ===================== */
@@ -5207,6 +5207,7 @@ async function loadMarket(force=false,poll=false){
  if(mktLoaded&&!force&&!poll){resumeMarketFlowOverview();return;}
  if(mktLoading)return;
  mktLoading=true;
+ if(force)g('mktTime').textContent=' · 正在刷新最新行情与行业资金流…';
  let d=null;
  try{
   const query=force?'?force=1&t='+Date.now():(poll?'?poll=1&t='+Date.now():'');
