@@ -42,6 +42,16 @@ python -m compileall -q app.py agent.py monitor.py monitoring tests
 python -m pip install -r requirements.txt
 ```
 
+构建 Windows 体验包：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_experience_package.ps1
+```
+
+构建脚本使用运行文件白名单，并在压缩前拒绝数据库、缓存、日志、导出 Excel、凭据类文件、
+测试和开发文档。交付前还应把 ZIP 解压到独立目录，检查 Python 文件可编译、三个入口模块
+可导入，并在未安装项目依赖的普通 Windows 电脑上人工验证首次安装与 `启动.bat`。
+
 ## Mock 边界
 
 - 测试不访问同花顺、东方财富、腾讯、新浪、Baostock 或任何模型 API；行业快照固定重定向至临时文件。

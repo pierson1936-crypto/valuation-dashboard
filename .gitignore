@@ -36,6 +36,7 @@ data/*.db-*
 data/*.sqlite
 data/*.sqlite-*
 data/industry_flow_snapshot.json
+dist/
 
 # Editor and local agent metadata
 .idea/
