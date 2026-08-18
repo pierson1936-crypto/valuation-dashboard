@@ -90,6 +90,8 @@ class HttpSmokeTests(unittest.TestCase):
         self.assertIn("WATCH_FOCUS_HIDDEN_KEY", html)
         self.assertIn("watch-focus", html)
         self.assertIn("取消突出", html)
+        self.assertIn("const all=loadWatch(),w=all", html)
+        self.assertNotIn("w=watchFocusHidden?all.filter", html)
         self.assertIn('id="tab-monitor"', html)
         self.assertIn("/api/monitor/overview", html)
         self.assertIn("/api/monitor/simulate", html)
