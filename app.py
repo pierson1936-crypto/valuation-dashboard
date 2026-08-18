@@ -4111,7 +4111,7 @@ button:hover{background:#1d4ed8} button.g{background:#059669} button.g:hover{bac
  </div>
  <div id="watchListPane">
   <div class="card" id="watchCard">
-   <div class="sec-title">⭐ 自选股 <span class="sub" style="font-weight:400">· 分组追踪 · 60 秒刷新</span><span class="watch-title-actions"><button id="watchFocusFilter" type="button" onclick="toggleWatchFocusHidden()" aria-pressed="false" title="隐藏重点关注标的"><i data-lucide="eye-off"></i><span>隐藏重点</span></button><span class="watch-refresh" onclick="refreshWatchQuotes(true)">↻ 刷新行情</span></span></div>
+   <div class="sec-title">⭐ 自选股 <span class="sub" style="font-weight:400">· 分组追踪 · 60 秒刷新</span><span class="watch-title-actions"><button id="watchFocusFilter" type="button" onclick="toggleWatchFocusHidden()" aria-pressed="false" title="取消重点关注标的的突出效果"><i data-lucide="eye-off"></i><span>取消突出</span></button><span class="watch-refresh" onclick="refreshWatchQuotes(true)">↻ 刷新行情</span></span></div>
    <div class="watch-addbar">
     <input id="wadd" maxlength="6" placeholder="加自选：6位代码" onkeydown="if(event.key==='Enter')addWatch()">
     <input id="wgroup" maxlength="20" list="watchGroupOptions" placeholder="分组，如 科技龙头" onkeydown="if(event.key==='Enter')addWatch()">
@@ -4326,13 +4326,12 @@ function watchGroupTrend(name,items,stats){const entry=watchGroupEntry(loadWatch
 function watchGroupSignal(stats,trend){if(stats.valid<2)return{label:'样本不足',kind:'',title:'至少需要 2 只有效行情才能判断组内同步性'};if(trend.samples.length>=2&&trend.delta>=.3&&trend.breadthDelta>=.2)return{label:'同步回暖',kind:'warming',title:'组均涨幅较今日首次记录提升至少 0.3 个百分点，且上涨占比提升至少 20 个百分点'};if(trend.samples.length>=2&&(trend.delta>=.3||trend.breadthDelta>=.2))return{label:'回升观察',kind:'rising',title:'组均涨幅或上涨占比较今日首次记录明显回升，但尚未同时满足'};if(stats.avg>=.5&&stats.upRatio>=.6)return{label:'整体偏强',kind:'strong',title:'当前组均涨幅至少 0.5%，且上涨标的占比至少 60%'};if(stats.avg<=-.5&&stats.upRatio<=.4)return{label:'整体承压',kind:'pressured',title:'当前组均涨幅不高于 -0.5%，且上涨标的占比不高于 40%'};return{label:'分化 / 平稳',kind:'',title:'当前组内强弱不一，或变化尚未达到观察阈值'};}
 function watchGroupSparkline(samples){if(samples.length<2)return'<span class="watch-track-empty">基线待更新</span>';const values=samples.map(x=>Number(x.avg)).filter(Number.isFinite);if(values.length<2)return'<span class="watch-track-empty">基线待更新</span>';const width=96,height=30,pad=3,min=Math.min(...values),max=Math.max(...values),range=Math.max(max-min,.01),points=values.map((v,i)=>`${(pad+i*(width-pad*2)/(values.length-1)).toFixed(1)},${(height-pad-(v-min)*(height-pad*2)/range).toFixed(1)}`).join(' '),tone=values[values.length-1]>=values[0]?'#f2495c':'#2ec26e',zero=min<=0&&max>=0?(height-pad-(0-min)*(height-pad*2)/range).toFixed(1):null;return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="组均涨幅今日轨迹">${zero?`<line class="watch-track-zero" x1="${pad}" x2="${width-pad}" y1="${zero}" y2="${zero}"></line>`:''}<polyline class="watch-track-line" points="${points}" stroke="${tone}"></polyline></svg>`;}
 let watchFocusHidden=localStorage.getItem(WATCH_FOCUS_HIDDEN_KEY)==='1';
-function updateWatchFocusFilter(all){const button=g('watchFocusFilter');if(!button)return;const count=all.filter(item=>item.focus).length;button.disabled=!count;button.setAttribute('aria-pressed',String(watchFocusHidden));button.title=watchFocusHidden?'显示重点关注标的':'隐藏重点关注标的';const label=button.querySelector('span');if(label)label.textContent=watchFocusHidden?'显示重点':'隐藏重点';}
+function updateWatchFocusFilter(all){const button=g('watchFocusFilter');if(!button)return;const count=all.filter(item=>item.focus).length;button.disabled=!count;button.setAttribute('aria-pressed',String(watchFocusHidden));button.title=watchFocusHidden?'恢复重点关注标的的突出效果':'取消重点关注标的的突出效果';const label=button.querySelector('span');if(label)label.textContent=watchFocusHidden?'恢复突出':'取消突出';}
 function toggleWatchFocusHidden(){const all=loadWatch();if(!all.some(item=>item.focus))return;watchFocusHidden=!watchFocusHidden;localStorage.setItem(WATCH_FOCUS_HIDDEN_KEY,watchFocusHidden?'1':'0');renderWatch();}
 function toggleWatchFocus(code){const w=loadWatch(),item=w.find(row=>row.code===code);if(!item)return;item.focus=!item.focus;saveWatch(w);}
-function renderWatch(){const all=loadWatch(),w=watchFocusHidden?all.filter(item=>!item.focus):all,el=g('watchList');if(!el)return;
+function renderWatch(){const all=loadWatch(),w=all,el=g('watchList');if(!el)return;
  renderWatchGroupOptions(all);updateWatchFocusFilter(all);
  if(!all.length){el.innerHTML='<div class="sub" style="font-size:12px;padding:12px">还没有自选股。上方输入代码添加，或分析某只后点「★ 加自选」。</div>';return;}
- if(!w.length){el.innerHTML='<div class="sub" style="font-size:12px;padding:12px">重点关注标的已隐藏。点击上方“显示重点”可恢复。</div>';return;}
  const head='<div class="watch-head"><div class="watch-col">名称 / 代码</div><div class="watch-col">最新</div><div class="watch-col">涨幅</div><div class="watch-col delta">涨跌</div><div class="watch-col tools">操作</div></div>';
  el.innerHTML=head+[...groupWatchItems(w)].map(([group,items])=>{const stats=watchGroupStats(items),trend=watchGroupTrend(group,items,stats),signal=watchGroupSignal(stats,trend),tone=!Number.isFinite(stats.avg)?'watch-flat':(stats.avg>0?'watch-up':(stats.avg<0?'watch-down':'watch-flat')),delta=trend.samples.length>=2?watchPoint(trend.delta):'建立基线';return `<section class="watch-group-section">
   <div class="watch-group-summary">
@@ -4343,7 +4342,7 @@ function renderWatch(){const all=loadWatch(),w=watchFocusHidden?all.filter(item=
    <div class="watch-group-metric watch-track" title="组均涨幅今日轨迹">${watchGroupSparkline(trend.samples)}</div>
    <div class="watch-signal ${signal.kind}" title="${escHtml(signal.title)}">${escHtml(signal.label)} · ${escHtml(delta)}</div>
   </div>
-  ${items.map(x=>{const q=watchQuotes.get(x.code),rowTone=watchTone(q),name=x.name||(q&&q.name)||'正在获取名称…';return `<div class="watch-row${x.focus?' watch-focus':''}" onclick="ex('${x.code}')">
+  ${items.map(x=>{const q=watchQuotes.get(x.code),rowTone=watchTone(q),name=x.name||(q&&q.name)||'正在获取名称…';return `<div class="watch-row${x.focus&&!watchFocusHidden?' watch-focus':''}" onclick="ex('${x.code}')">
    <div class="watch-security"><div class="watch-name">${escHtml(name)}</div><div class="watch-code">${escHtml(x.code)}</div></div>
    <div class="watch-num ${rowTone}">${q&&q.price!=null?escHtml(q.price):'—'}</div>
    <div class="watch-num ${rowTone}">${q&&q.chg!=null?escHtml(signedNumber(q.chg,'%')):'—'}</div>
@@ -5151,13 +5150,13 @@ function showTab(name){
  if(g('openAiKeyBar'))g('openAiKeyBar').style.display=monitorMode?'none':'flex';
  if(workMode){g('chat').style.display='none';g('fab').style.display='none';}
  else if(g('chat').style.display==='none')g('fab').style.display='block';
- if(name==='market'){loadMarket();resumeMarketFlowOverview();}
+ if(name==='market')loadMarket();
  if(name==='watch'){if(g('watchHoldingsPane').style.display!=='none')loadHoldings();else refreshWatchQuotes();}
  if(name==='monitor')loadMonitor(true);
 }
 
 /* ===================== 行业资金结构概览 ===================== */
-let marketFlowOverviewSource=null,marketFlowOverviewResizeTimer=0,marketFlowOverviewResizeObserver=null,marketFlowOverviewUnavailableMessage='';
+let marketFlowOverviewSource=null,marketFlowOverviewResizeTimer=0,marketFlowOverviewResizeObserver=null,marketFlowOverviewUnavailableMessage='',marketFlowOverviewAnimation=0;
 const SVG_NS='http://www.w3.org/2000/svg';
 function shortLabel(v,n=6){const s=String(v||'');return s.length>n?s.slice(0,n-1)+'…':s;}
 function fmtYi(v){return v==null?'—':(v>=0?'+':'')+Number(v).toFixed(1)+'亿';}
@@ -5183,22 +5182,25 @@ function buildMarketFlowOverviewSvg(state){
  for(let i=0;i<8;i++){
   const y=62+i*36,out=outflows[i],incoming=inflows[i];
   svg.append(svgEl('line',{x1:leftStart,y1:y+3,x2:rightEnd,y2:y+3,stroke:'#162137','stroke-width':1}));
-  if(out){const bw=scale(out.flow),bar=svgEl('rect',{x:leftEnd-bw,y:y-6,width:bw,height:13,rx:2,fill:'#2ec26e','fill-opacity':.82});bar.append(svgEl('title',{},`${out.name}\n资金净额 ${fmtYi(out.flow)}\n涨跌幅 ${out.chg>=0?'+':''}${out.chg.toFixed(2)}%`));svg.append(bar);svg.append(svgEl('text',{x:barLeft,y:y-1,...labelAttrs},shortLabel(out.name,narrow?5:6)));svg.append(svgEl('text',{x:barLeft,y:y+12,...valueAttrs},fmtYi(out.flow)));}
-  if(incoming){const bw=scale(incoming.flow),bar=svgEl('rect',{x:rightStart,y:y-6,width:bw,height:13,rx:2,fill:'#f2495c','fill-opacity':.82});bar.append(svgEl('title',{},`${incoming.name}\n资金净额 ${fmtYi(incoming.flow)}\n涨跌幅 ${incoming.chg>=0?'+':''}${incoming.chg.toFixed(2)}%`));svg.append(bar);svg.append(svgEl('text',{x:barRight,y:y-1,'text-anchor':'end',...labelAttrs},shortLabel(incoming.name,narrow?5:6)));svg.append(svgEl('text',{x:barRight,y:y+12,'text-anchor':'end',...valueAttrs},fmtYi(incoming.flow)));}
+  if(out){const bw=scale(out.flow),bar=svgEl('rect',{x:leftEnd-bw,y:y-6,width:bw,height:13,rx:2,fill:'#2ec26e','fill-opacity':.82,'data-flow-bar':'1','data-flow-start-x':leftEnd,'data-flow-x':leftEnd-bw,'data-flow-width':bw});bar.append(svgEl('title',{},`${out.name}\n资金净额 ${fmtYi(out.flow)}\n涨跌幅 ${out.chg>=0?'+':''}${out.chg.toFixed(2)}%`));svg.append(bar);svg.append(svgEl('text',{x:barLeft,y:y-1,...labelAttrs},shortLabel(out.name,narrow?5:6)));svg.append(svgEl('text',{x:barLeft,y:y+12,...valueAttrs},fmtYi(out.flow)));}
+  if(incoming){const bw=scale(incoming.flow),bar=svgEl('rect',{x:rightStart,y:y-6,width:bw,height:13,rx:2,fill:'#f2495c','fill-opacity':.82,'data-flow-bar':'1','data-flow-start-x':rightStart,'data-flow-x':rightStart,'data-flow-width':bw});bar.append(svgEl('title',{},`${incoming.name}\n资金净额 ${fmtYi(incoming.flow)}\n涨跌幅 ${incoming.chg>=0?'+':''}${incoming.chg.toFixed(2)}%`));svg.append(bar);svg.append(svgEl('text',{x:barRight,y:y-1,'text-anchor':'end',...labelAttrs},shortLabel(incoming.name,narrow?5:6)));svg.append(svgEl('text',{x:barRight,y:y+12,'text-anchor':'end',...valueAttrs},fmtYi(incoming.flow)));}
  }
  if(!narrow)svg.append(svgEl('line',{x1:split,y1:18,x2:split,y2:h-18,stroke:'#22304a','stroke-width':1}));
  const kinds=['流入上涨','流入下跌','流出上涨','流出下跌'],counts=Object.fromEntries(kinds.map(kind=>[kind,0]));rows.forEach(item=>counts[marketFlowKind(item)]++);
  const donutCx=narrow?w/2:split+(w-split)/2,donutCy=narrow?472:145,outer=narrow?70:Math.min(72,(w-split)*.25),inner=outer*.64,total=Math.max(1,rows.length);let angle=-Math.PI/2;
- kinds.forEach(kind=>{const share=counts[kind]/total;if(!share)return;const end=angle+share*Math.PI*2-.018;svg.append(svgEl('path',{d:donutArcPath(donutCx,donutCy,outer,inner,angle,end),fill:marketFlowKindColor(kind)}));angle+=share*Math.PI*2;});
- svg.append(svgEl('text',{x:donutCx,y:donutCy-2,'text-anchor':'middle',fill:'#eaf1fb','font-size':20,'font-family':font,'font-weight':700},String(rows.length)));
- svg.append(svgEl('text',{x:donutCx,y:donutCy+17,'text-anchor':'middle',fill:'#7183a0','font-size':10,'font-family':font},'个行业'));
+ const donut=svgEl('g',{'data-flow-donut':'1','data-flow-cx':donutCx,'data-flow-cy':donutCy});
+ kinds.forEach(kind=>{const share=counts[kind]/total;if(!share)return;const end=angle+share*Math.PI*2-.018;donut.append(svgEl('path',{d:donutArcPath(donutCx,donutCy,outer,inner,angle,end),fill:marketFlowKindColor(kind)}));angle+=share*Math.PI*2;});
+ donut.append(svgEl('text',{x:donutCx,y:donutCy-2,'text-anchor':'middle',fill:'#eaf1fb','font-size':20,'font-family':font,'font-weight':700},String(rows.length)));
+ donut.append(svgEl('text',{x:donutCx,y:donutCy+17,'text-anchor':'middle',fill:'#7183a0','font-size':10,'font-family':font},'个行业'));
+ svg.append(donut);
  svg.append(svgEl('text',{x:donutCx,y:narrow?376:30,'text-anchor':'middle',...headerAttrs},'资金方向 × 涨跌方向'));
  kinds.forEach((kind,i)=>{const x=narrow?(i%2===0?30:w/2+8):split+22,y=narrow?568+Math.floor(i/2)*30:246+i*28;svg.append(svgEl('rect',{x,y,width:10,height:10,rx:2,fill:marketFlowKindColor(kind)}));svg.append(svgEl('text',{x:x+17,y:y+9,fill:'#aebbd0','font-size':10,'font-family':font},`${kind} ${counts[kind]}`));});
 }
 function updateMarketFlowOverviewMeta(state){const meta=g('marketFlowOverviewMeta');if(!meta)return;if(marketFlowOverviewUnavailableMessage){meta.textContent=marketFlowOverviewUnavailableMessage;return;}const inflowCount=state.rows.filter(item=>item.flow>0).length,outflowCount=state.rows.filter(item=>item.flow<0).length;meta.innerHTML=`<span>净流入 <strong>${inflowCount}</strong> 个 · 净流出 <strong>${outflowCount}</strong> 个</span><span>柱长采用对数缩放 · 数字为实际亿元</span>`;}
 function watchMarketFlowOverviewSize(svg){if(marketFlowOverviewResizeObserver||!window.ResizeObserver)return;marketFlowOverviewResizeObserver=new ResizeObserver(()=>{clearTimeout(marketFlowOverviewResizeTimer);marketFlowOverviewResizeTimer=setTimeout(()=>{if(marketFlowOverviewSource&&g('tab-market').style.display!=='none')drawMarketFlowOverview(marketFlowOverviewSource);},100);});marketFlowOverviewResizeObserver.observe(svg.parentElement);}
-function drawMarketFlowOverview(sectors){marketFlowOverviewSource=sectors||[];const state=makeMarketFlowOverviewState(marketFlowOverviewSource);if(!state)return;buildMarketFlowOverviewSvg(state);updateMarketFlowOverviewMeta(state);watchMarketFlowOverviewSize(state.svg);}
-function resumeMarketFlowOverview(){if(marketFlowOverviewSource&&g('tab-market').style.display!=='none')drawMarketFlowOverview(marketFlowOverviewSource);}
+function replayMarketFlowOverview(svg){if(marketFlowOverviewAnimation)cancelAnimationFrame(marketFlowOverviewAnimation);if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;const bars=[...svg.querySelectorAll('[data-flow-bar]')],donut=svg.querySelector('[data-flow-donut]');if(!bars.length&&!donut)return;const duration=620,start=performance.now(),ease=t=>1-Math.pow(1-t,3);const frame=now=>{const progress=Math.min(1,ease((now-start)/duration));bars.forEach(bar=>{const from=Number(bar.dataset.flowStartX),to=Number(bar.dataset.flowX),width=Number(bar.dataset.flowWidth);bar.setAttribute('x',from+(to-from)*progress);bar.setAttribute('width',width*progress);});if(donut){const cx=Number(donut.dataset.flowCx),cy=Number(donut.dataset.flowCy),scale=.82+.18*progress;donut.setAttribute('opacity',.35+.65*progress);donut.setAttribute('transform',`translate(${cx} ${cy}) scale(${scale}) translate(${-cx} ${-cy})`);}if(progress<1)marketFlowOverviewAnimation=requestAnimationFrame(frame);else marketFlowOverviewAnimation=0;};marketFlowOverviewAnimation=requestAnimationFrame(frame);}
+function drawMarketFlowOverview(sectors,animate=false){marketFlowOverviewSource=sectors||[];const state=makeMarketFlowOverviewState(marketFlowOverviewSource);if(!state)return;buildMarketFlowOverviewSvg(state);updateMarketFlowOverviewMeta(state);watchMarketFlowOverviewSize(state.svg);if(animate)replayMarketFlowOverview(state.svg);}
+function resumeMarketFlowOverview(){if(marketFlowOverviewSource&&g('tab-market').style.display!=='none')drawMarketFlowOverview(marketFlowOverviewSource,true);}
 /* ===================== 大盘 + 板块轮动 ===================== */
 let mktLoaded=false,mktLoading=false,mktRefreshTimer=0;
 async function loadMarket(force=false,poll=false){
@@ -5238,7 +5240,7 @@ async function loadMarket(force=false,poll=false){
   if(hasGsap()){gsap.fromTo(fills,{width:0},{width:(i,el)=>el.dataset.w+'%',duration:.7,ease:'power3.out',stagger:.05});}
   else{setTimeout(()=>fills.forEach(f=>{f.style.width=f.dataset.w+'%';}),60);}
   marketFlowOverviewUnavailableMessage=d.flow_complete?'':(d.refreshing?'正在后台更新行业资金流；当前没有可用的完整快照。':'行业资金流排行暂不可用：最近快照未同时覆盖净流入与净流出。');
-  drawMarketFlowOverview(d.flow_complete?(d.sectors||[]):[]);
+  drawMarketFlowOverview(d.flow_complete?(d.sectors||[]):[],true);
  }catch(e){g('sectorRotation').innerHTML='<div class="sub">大盘数据加载失败：'+e+'</div>';g('marketFlowOverviewMeta').textContent='大盘数据暂不可用，请稍后刷新。';}
  finally{mktLoading=false;clearTimeout(mktRefreshTimer);if(d&&d.refreshing)mktRefreshTimer=setTimeout(()=>loadMarket(false,true),2000);}
 }
