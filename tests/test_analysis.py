@@ -191,6 +191,27 @@ class KeyLevelAnalysisTests(unittest.TestCase):
         self.assertEqual(result["chip"]["source_label"], "东方财富")
         self.assertIn("东方财富", result["source_note"])
 
+    def test_structure_view_does_not_fetch_chip_sources(self):
+        analyzed = {
+            "code": "600000",
+            "name": "固定股票",
+            "date": "2026-08-12",
+            "is_stock": True,
+            "chart": self.box_chart(),
+        }
+        with (
+            patch.object(app, "fetch_eastmoney_chip_kline") as eastmoney,
+            patch.object(app, "fetch_baostock_chip_kline") as baostock,
+        ):
+            result = app.build_key_levels(analyzed, include_chip=False)
+
+        self.assertEqual(result["chip_status"], "not_requested")
+        self.assertIsNone(result["chip"])
+        self.assertIsNotNone(result["support"])
+        self.assertIsNotNone(result["pressure"])
+        eastmoney.assert_not_called()
+        baostock.assert_not_called()
+
     def test_chip_estimate_reports_ranges_and_provenance_fields(self):
         result = app.estimate_chip_distribution(self.chip_rows())
 
@@ -266,18 +287,20 @@ class KeyLevelAnalysisTests(unittest.TestCase):
         fresh = {"code": "600000", "chip_status": "available"}
         try:
             app._KEY_LEVEL_CACHE.clear()
-            app._KEY_LEVEL_CACHE["600000"] = (app.time.time(), stale)
+            app._KEY_LEVEL_CACHE[("600000", "chip")] = (app.time.time(), stale)
             with (
                 patch.object(app, "analyze_cached", return_value={"code": "600000"}),
                 patch.object(app, "build_key_levels", return_value=fresh) as build,
             ):
-                result = app.key_levels_cached("600000", retry_failure=True)
+                result = app.key_levels_cached(
+                    "600000", retry_failure=True, include_chip=True
+                )
         finally:
             app._KEY_LEVEL_CACHE.clear()
             app._KEY_LEVEL_CACHE.update(original_cache)
 
         self.assertEqual(result, fresh)
-        build.assert_called_once()
+        build.assert_called_once_with({"code": "600000"}, include_chip=True)
 
     def test_price_mismatch_blocks_chip_overlay(self):
         rows = self.chip_rows(close_scale=1.25)
@@ -660,7 +683,7 @@ class IndependentSecurityReportTests(unittest.TestCase):
             )
 
         prompt = api_post.call_args.args[2]["messages"][1]["content"]
-        load_levels.assert_called_once_with("600000")
+        load_levels.assert_called_once_with("600000", include_chip=True)
         self.assertIn('"topic": "估算成本密集区"', prompt)
         self.assertIn("近120日本地模型估算", prompt)
         self.assertNotIn("profit_ratio_pct", prompt)
