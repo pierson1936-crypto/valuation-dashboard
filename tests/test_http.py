@@ -143,7 +143,8 @@ class HttpSmokeTests(unittest.TestCase):
         self.assertIn("toggleKeyLevelView", html)
         self.assertIn("currentKeyLevelView===view?null:view", html)
         self.assertIn("retryUnavailableChip", html)
-        self.assertIn("&retry=1", html)
+        self.assertIn("query.push('chip=1')", html)
+        self.assertIn("query.push('retry=1')", html)
         self.assertIn("重试筹码结构", html)
         self.assertIn("keyLevelRequest&&keyLevelRequest.code===code", html)
         self.assertIn("近120日估算筹码", html)
@@ -307,7 +308,9 @@ class HttpSmokeTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload, expected)
-        build.assert_called_once_with("600000", retry_failure=False)
+        build.assert_called_once_with(
+            "600000", retry_failure=False, include_chip=False
+        )
 
     def test_key_level_endpoint_can_retry_only_a_cached_failure(self):
         expected = {"code": "600000", "chip_status": "available"}
@@ -318,7 +321,20 @@ class HttpSmokeTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload, expected)
-        build.assert_called_once_with("600000", retry_failure=True)
+        build.assert_called_once_with(
+            "600000", retry_failure=True, include_chip=False
+        )
+
+    def test_key_level_endpoint_requests_chip_only_when_explicit(self):
+        expected = {"code": "600000", "chip_status": "available"}
+        with patch.object(app, "key_levels_cached", return_value=expected) as build:
+            status, payload = self.get_json("/api/key-levels?code=600000&chip=1")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, expected)
+        build.assert_called_once_with(
+            "600000", retry_failure=False, include_chip=True
+        )
 
     def test_key_level_endpoint_rejects_invalid_code_before_fetch(self):
         with patch.object(app, "key_levels_cached") as build:

@@ -969,7 +969,7 @@ def _describe_chip_peak(chip, box, support=None, pressure=None):
     }
 
 
-def build_key_levels(analyzed):
+def build_key_levels(analyzed, include_chip=True):
     """Build an isolated, display-only key-level result from existing chart data."""
     chart = (analyzed or {}).get("chart") or {}
     structure = detect_price_structure(chart)
@@ -989,6 +989,11 @@ def build_key_levels(analyzed):
     }
     if not analyzed.get("is_stock"):
         result["chip_note"] = "ETF 存在申购赎回，第一版不展示可能失真的筹码估算。"
+        return _clean(result)
+
+    if not include_chip:
+        result["chip_status"] = "not_requested"
+        result["chip_note"] = "点击“筹码结构”后再读取筹码原始数据，不影响 K 线结构。"
         return _clean(result)
 
     code = str(analyzed.get("code") or "")
@@ -1032,23 +1037,24 @@ def build_key_levels(analyzed):
     return _clean(result)
 
 
-def key_levels_cached(code, retry_failure=False):
+def key_levels_cached(code, retry_failure=False, include_chip=False):
     code = str(code or "").strip()
     now = time.time()
+    cache_key = (code, "chip" if include_chip else "structure")
     with _key_level_lock:
-        cached = _KEY_LEVEL_CACHE.get(code)
+        cached = _KEY_LEVEL_CACHE.get(cache_key)
         if cached:
             cached_at, value = cached
-            ttl = KEY_LEVEL_TTL if value.get("chip_status") in {"available", "not_applicable"} else KEY_LEVEL_FAILURE_TTL
-            retry_unavailable = retry_failure and value.get("chip_status") == "unavailable"
+            ttl = KEY_LEVEL_TTL if value.get("chip_status") in {"available", "not_applicable", "not_requested"} else KEY_LEVEL_FAILURE_TTL
+            retry_unavailable = include_chip and retry_failure and value.get("chip_status") == "unavailable"
             if not retry_unavailable and now - cached_at < ttl:
                 return value
     analyzed = analyze_cached(code)
     if analyzed.get("error"):
         return analyzed
-    value = build_key_levels(analyzed)
+    value = build_key_levels(analyzed, include_chip=include_chip)
     with _key_level_lock:
-        _KEY_LEVEL_CACHE[code] = (now, value)
+        _KEY_LEVEL_CACHE[cache_key] = (now, value)
     return value
 
 
@@ -3465,7 +3471,7 @@ def generate_security_ai_report(code, api_key, deepseek_model=""):
     key_level_data = None
     if result.get("is_stock"):
         try:
-            key_level_data = key_levels_cached(result.get("code"))
+            key_level_data = key_levels_cached(result.get("code"), include_chip=True)
         except Exception:
             key_level_data = None
     evidence = build_security_ai_evidence(
@@ -3979,11 +3985,11 @@ button:hover{background:#1d4ed8} button.g{background:#059669} button.g:hover{bac
 @media(max-width:980px){.monitor-columns{grid-template-columns:minmax(0,1fr)}.monitor-runtime{align-items:flex-start;flex-wrap:wrap}.monitor-runtime-meta{order:3;flex-basis:100%}.monitor-actions{margin-left:auto}.monitor-logic-grid{grid-template-columns:minmax(0,1fr)}.monitor-draft{border-left:0;border-top:1px solid #22304a;padding:14px 0 0}}
 @media(max-width:620px){.monitor-runtime{padding:10px 2px}.monitor-state{min-width:0;flex:1}.monitor-actions{width:100%;margin:0}.monitor-actions button{flex:1;padding:8px 7px}.monitor-form,.monitor-logic-form{grid-template-columns:1fr}.monitor-field.full,.monitor-form-foot,.monitor-logic-form .monitor-field.wide,.monitor-logic-actions{grid-column:1}.monitor-form-foot{align-items:flex-start;flex-direction:column}.monitor-row{grid-template-columns:minmax(120px,1.4fr) repeat(2,minmax(62px,.7fr));gap:8px}.monitor-price.target,.monitor-move{display:none}.monitor-row-actions{grid-column:1/-1;justify-content:flex-start}.monitor-draft-outcomes{grid-template-columns:1fr}.monitor-draft-outcome+.monitor-draft-outcome{border-left:0;border-top:1px solid #22304a}.monitor-draft-rule{grid-template-columns:68px minmax(0,1fr)}.monitor-draft-rule>span:last-child{grid-column:2}.monitor-draft-actions{align-items:stretch;flex-direction:column}.monitor-draft-actions button{justify-content:center;width:100%;white-space:normal}.monitor-preview.visible{grid-template-columns:1fr 78px}.monitor-preview-title{grid-column:1}.monitor-preview-message{grid-column:1/-1}.monitor-preview .monitor-tag{grid-column:2;grid-row:1;justify-self:end}.monitor-explanation-cols{grid-template-columns:1fr}.monitor-event{grid-template-columns:1fr 100px}.monitor-event-security{grid-column:1}.monitor-event-time{grid-column:1}.monitor-event-message{grid-column:1/-1}.monitor-event-actions{grid-column:2;grid-row:1/3;justify-self:end}}
 /* 标签导航 */
-.tabnav{display:flex;gap:6px;margin:16px 0 4px;border-bottom:1px solid #22304a;flex-wrap:wrap}
-.tabbtn{background:transparent;border:0;border-bottom:2px solid transparent;color:#7b8aa6;font-size:15px;
- padding:10px 16px;cursor:pointer;border-radius:0;font-weight:600}
-.tabbtn:hover{color:#dbe6f7}
-.tabbtn.active{color:#eaf1fb;border-bottom-color:#3b82f6}
+.tabnav{position:sticky;top:10px;z-index:40;display:flex;gap:4px;width:max-content;max-width:100%;margin:16px auto 10px;padding:5px;border:1px solid rgba(96,165,250,.32);border-radius:999px;background:rgba(14,21,33,.94);box-shadow:0 10px 28px rgba(0,0,0,.32),0 0 18px rgba(59,130,246,.1);backdrop-filter:blur(14px);flex-wrap:wrap}
+.tabbtn{background:transparent;border:0;color:#9fb0c8;font-size:14px;padding:9px 14px;cursor:pointer;border-radius:999px;font-weight:600}
+.tabbtn:hover{color:#eaf1fb;background:rgba(59,130,246,.16)}
+.tabbtn.active{color:#eff6ff;background:#1d4ed8;box-shadow:0 0 14px rgba(59,130,246,.42)}
+@media(max-width:720px){.tabnav{top:6px;justify-content:center}.tabbtn{padding:8px 10px;font-size:13px}}
 .tabpage{animation:fade .25s ease}
 @keyframes fade{from{opacity:.3}to{opacity:1}}
 /* 大盘 */
@@ -4053,13 +4059,13 @@ button:hover{background:#1d4ed8} button.g{background:#059669} button.g:hover{bac
  <span id="okstat" class="sub"></span>
  <a class="klink" href="https://platform.openai.com/api-keys" target="_blank">申请</a>
 </div>
-<div class="tabnav">
+<nav class="tabnav" aria-label="主导航">
  <button class="tabbtn active" data-tab="market" onclick="showTab('market')">📊 大盘</button>
  <button class="tabbtn" data-tab="analyze" onclick="showTab('analyze')">🔍 个股分析</button>
  <button class="tabbtn" data-tab="watch" onclick="showTab('watch')">⭐ 自选</button>
  <button class="tabbtn" data-tab="monitor" onclick="showTab('monitor')">⏱ 盯盘</button>
  <button class="tabbtn" data-tab="panel" onclick="showTab('panel')">🧑‍💼 多股对比</button>
-</div>
+</nav>
 
 <div id="tab-market" class="tabpage">
  <div class="card"><div class="sec-title">大盘指数 <span class="sub" id="mktTime" style="font-weight:400"></span>
@@ -4797,8 +4803,8 @@ function render(r){
  h+='</div></div>';
 
  // 主图
- h+=`<div class="card"><div class="key-level-head"><div><div class="sec-title">K线 · 均线 · 买卖信号 · 量能 · MACD</div><div class="sub">默认显示原始 K 线；两个结构视图按需加载且互斥</div></div><div class="key-level-actions"><button id="klineStructureBtn" class="key-level-button" type="button" data-key-view="structure" aria-pressed="false" onclick="toggleKeyLevelView('${r.code}','structure')"><i data-lucide="scan-search"></i><span>K线结构</span></button>${r.is_stock?`<button id="chipStructureBtn" class="key-level-button" type="button" data-key-view="chip" aria-pressed="false" onclick="toggleKeyLevelView('${r.code}','chip')"><i data-lucide="bar-chart-3"></i><span>筹码结构</span></button>`:''}</div></div><div id="keyLevelSummary" class="key-level-summary"></div>
-     <div id="chart" style="height:560px"></div></div>`;
+ h+=`<div class="card"><div class="key-level-head"><div><div class="sec-title">K线 · 均线 · 买卖信号 · 量能 · MACD</div><div class="sub">默认显示原始 K 线；两个结构视图按需加载且互斥</div></div><div class="key-level-actions"><button id="klineStructureBtn" class="key-level-button" type="button" data-key-view="structure" aria-pressed="false" onclick="toggleKeyLevelView('${r.code}','structure')"><i data-lucide="scan-search"></i><span>K线结构</span></button>${r.is_stock?`<button id="chipStructureBtn" class="key-level-button" type="button" data-key-view="chip" aria-pressed="false" onclick="toggleKeyLevelView('${r.code}','chip')"><i data-lucide="bar-chart-3"></i><span>筹码结构</span></button>`:''}</div></div>
+     <div id="chart" style="height:560px"></div><div id="keyLevelSummary" class="key-level-summary"></div></div>`;
 
  // 资金流向 + 异动提醒
  h+='<div class="card"><div class="sec-title">资金流向（近5日）· 异动提醒</div>';
@@ -4993,7 +4999,7 @@ function renderKeyLevelSummary(data,view){
   const pivots=Array.isArray(priceAction.pivot_points)?priceAction.pivot_points:[];
   const pivotText=pivots.map(item=>[item.label||'波段点',item.date,marketNum(item.price,3)].filter(Boolean).join(' ')).join(' · ');
   const detail=[`结构结论：${priceAction.regime||'等待更多数据'}。`,priceAction.detail,priceAction.event].filter(Boolean).map(escHtml).join('<br>');
-  box.innerHTML=`<div class="key-level-grid">${items.map(([label,value])=>`<div class="key-level-item"><span>${escHtml(label)}</span><strong>${escHtml(value)}</strong></div>`).join('')}</div>${detail?`<div class="key-level-text">${detail}</div>`:''}${pivotText?`<details class="key-level-pivots"><summary>近期波段详情</summary><div>${escHtml(pivotText)}</div></details>`:''}<div class="key-level-note">${escHtml(data.structure_note||data.box_note||'')} 蓝色实线边框区域为已确认震荡区间；绿色或黄色虚线边框区域仅为未确认观察区。</div>`;
+  box.innerHTML=`<div class="key-level-grid">${items.map(([label,value])=>`<div class="key-level-item"><span>${escHtml(label)}</span><strong>${escHtml(value)}</strong></div>`).join('')}</div>${detail?`<div class="key-level-text">${detail}</div>`:''}${pivotText?`<details class="key-level-pivots"><summary>近期波段详情</summary><div>${escHtml(pivotText)}</div></details>`:''}<div class="key-level-note">${escHtml(data.structure_note||data.box_note||'')} 淡蓝实线框为已确认震荡区间；淡蓝虚线框为未确认观察区。</div>`;
  }else if(chip){
   items.push(['主要估算成本密集区',marketNum(chip.peak_price,3)]);
   items.push(['相对现价',chip.peak_position||'—']);
@@ -5011,12 +5017,12 @@ function renderKeyLevelSummary(data,view){
 function keyLevelChartMarks(c,data,view){
  const lines=[],areas=[],range=data&&data.box,support=data&&data.support,pressure=data&&data.pressure,chip=data&&data.chip,priceAction=data&&data.price_action||{};
  if(view==='structure'){
-  if(support)lines.push({name:'可能支撑',yAxis:support.price,lineStyle:{color:'#34d399',type:'dashed'}});
-  if(pressure)lines.push({name:'可能压力',yAxis:pressure.price,lineStyle:{color:'#f59e0b',type:'dashed'}});
-  if(range)areas.push([{name:'已确认震荡区间',xAxis:range.start_date,yAxis:range.lower,itemStyle:{color:'rgba(96,165,250,.08)',borderColor:'#60a5fa',borderWidth:1},label:{show:false}},{xAxis:range.end_date||(c.dates||[]).at(-1),yAxis:range.upper}]);
-  const addObservationZone=(zone,name,color,borderColor)=>{if(zone)areas.push([{name,xAxis:zone.start_date,yAxis:zone.lower,itemStyle:{color,borderColor,borderWidth:1,borderType:'dashed'},label:{show:false}},{xAxis:zone.end_date||(c.dates||[]).at(-1),yAxis:zone.upper}]);};
-  if(!range&&!support)addObservationZone(priceAction.support_zone,'承接观察区','rgba(52,211,153,.035)','#6ee7b7');
-  if(!range&&!pressure)addObservationZone(priceAction.pressure_zone,'压力观察区','rgba(245,158,11,.035)','#fcd34d');
+  if(support)lines.push({name:'可能支撑',yAxis:support.price,lineStyle:{color:'#7dd3fc',type:'dashed'}});
+  if(pressure)lines.push({name:'可能压力',yAxis:pressure.price,lineStyle:{color:'#7dd3fc',type:'dashed'}});
+  if(range)areas.push([{name:'已确认震荡区间',xAxis:range.start_date,yAxis:range.lower,itemStyle:{color:'rgba(125,211,252,.055)',borderColor:'#7dd3fc',borderWidth:1,shadowBlur:8,shadowColor:'rgba(56,189,248,.5)'},label:{show:false}},{xAxis:range.end_date||(c.dates||[]).at(-1),yAxis:range.upper}]);
+  const addObservationZone=(zone,name)=>{if(zone)areas.push([{name,xAxis:zone.start_date,yAxis:zone.lower,itemStyle:{color:'rgba(125,211,252,.035)',borderColor:'#7dd3fc',borderWidth:1,borderType:'dashed',shadowBlur:6,shadowColor:'rgba(56,189,248,.38)'},label:{show:false}},{xAxis:zone.end_date||(c.dates||[]).at(-1),yAxis:zone.upper}]);};
+  if(!range&&!support)addObservationZone(priceAction.support_zone,'承接观察区');
+  if(!range&&!pressure)addObservationZone(priceAction.pressure_zone,'压力观察区');
  }
  if(view==='chip'&&chip){
   lines.push({name:'估算成本密集区',yAxis:chip.peak_price,lineStyle:{color:'#fb7185',width:1.3}});
@@ -5042,12 +5048,14 @@ function applyKeyLevelView(view){
 }
 async function toggleKeyLevelView(code,view){
  if(code!==cur||!['structure','chip'].includes(view)||(view==='chip'&&!currentSecurityResult.is_stock))return;
+ const needsChip=view==='chip'&&(!currentKeyLevels||currentKeyLevels.chip_status==='not_requested');
  const retryUnavailableChip=view==='chip'&&currentKeyLevels&&currentKeyLevels.chip_status==='unavailable'&&currentKeyLevelView!==view;
- if(currentKeyLevels&&!retryUnavailableChip){applyKeyLevelView(view);return;}
+ if(currentKeyLevels&&!needsChip&&!retryUnavailableChip){applyKeyLevelView(view);return;}
  if(keyLevelRequest&&keyLevelRequest.code===code)return;
  const requestState={code};keyLevelRequest=requestState;updateKeyLevelButtons(true);
  try{
-  const response=await fetch('/api/key-levels?code='+encodeURIComponent(code)+(retryUnavailableChip?'&retry=1':''));
+  const query=['code='+encodeURIComponent(code)];if(view==='chip')query.push('chip=1');if(retryUnavailableChip)query.push('retry=1');
+  const response=await fetch('/api/key-levels?'+query.join('&'));
   const data=await response.json();
   if(code!==cur)return;if(data.error)throw new Error(data.error);
   currentKeyLevels=data;applyKeyLevelView(view);
@@ -5391,8 +5399,11 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(json.dumps({"error": "请输入6位数字代码"}, ensure_ascii=False).encode("utf-8"))
                 else:
                     retry_failure = (qs.get("retry", [""])[0]).strip() == "1"
+                    include_chip = (qs.get("chip", [""])[0]).strip() == "1"
                     self._send(json.dumps(
-                        key_levels_cached(code, retry_failure=retry_failure),
+                        key_levels_cached(
+                            code, retry_failure=retry_failure, include_chip=include_chip
+                        ),
                         ensure_ascii=False,
                     ).encode("utf-8"))
             elif u.path == "/api/market":
